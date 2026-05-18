@@ -1,1512 +1,1296 @@
 import sys
 import sqlite3
-import random
-import traceback
-from hashlib import sha256
-from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
-                             QLineEdit, QPushButton, QLabel, QMessageBox, 
-                             QStackedWidget, QFrame, QComboBox, QDateEdit, 
-                             QTimeEdit, QDoubleSpinBox, QTableWidget, 
-                             QTableWidgetItem, QHeaderView, QGridLayout, QDialog, 
-                             QAbstractItemView, QGraphicsDropShadowEffect)
-from PyQt6.QtCore import Qt, QDate, QTime, QRegularExpression
-from PyQt6.QtGui import QRegularExpressionValidator, QColor
+import os
+from datetime import datetime, timedelta
+from random import choice, randint
+from PyQt5.QtWidgets import *
+from PyQt5.QtCore import Qt, QDate
+from PyQt5.QtGui import QFont
 
-# --- MODERN, ESNEK VE GELİŞMİŞ GLOBAL STİL (QSS) ---
-GLOBAL_STYLE = """
-    QWidget {
-        font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-        color: #2c3e50;
-    }
-    QLineEdit, QComboBox, QDateEdit, QTimeEdit, QDoubleSpinBox {
-        padding: 12px 15px;
-        border: 2px solid #e0e6ed;
-        border-radius: 8px;
-        background-color: #fdfdfd;
-        color: #34495e;
-        font-size: 15px;
-    }
-    QLineEdit:focus, QComboBox:focus, QDateEdit:focus, QTimeEdit:focus, QDoubleSpinBox:focus {
-        border: 2px solid #3498db;
-        background-color: #ffffff;
-    }
-    QPushButton {
-        border-radius: 8px;
-        font-weight: bold;
-        padding: 12px 15px;
-        font-size: 15px;
-        border: none;
-    }
-    QTableWidget {
-        border: 1px solid #e0e6ed;
-        border-radius: 10px;
-        background-color: white;
-        gridline-color: #ecf0f1;
-        alternate-background-color: #fbfcfc;
-    }
-    QHeaderView::section:horizontal {
-        background-color: #2c3e50;
-        color: white;
-        padding: 12px;
-        font-weight: bold;
-        border: none;
-        border-right: 1px solid #34495e;
-    }
-    QHeaderView::section:vertical {
-        background-color: #2c3e50;
-        color: white;
-        padding: 2px 8px;
-        font-weight: bold;
-        border: none;
-        border-bottom: 1px solid #34495e;
-    }
-    QDialog {
-        background-color: #f4f7f6;
-    }
-"""
 
-# GRADIENT (RENK GEÇİŞLİ) BUTON STİLLERİ
-BTN_BLUE = """QPushButton { background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #2980b9, stop:1 #3498db); color: white; } 
-              QPushButton:hover { background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #1f618d, stop:1 #2980b9); }"""
-BTN_GREEN = """QPushButton { background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #27ae60, stop:1 #2ecc71); color: white; } 
-               QPushButton:hover { background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #1e8449, stop:1 #27ae60); }"""
-BTN_RED = """QPushButton { background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #c0392b, stop:1 #e74c3c); color: white; } 
-             QPushButton:hover { background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #922b21, stop:1 #c0392b); }"""
-BTN_PURPLE = """QPushButton { background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #8e44ad, stop:1 #9b59b6); color: white; } 
-                QPushButton:hover { background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #6c3483, stop:1 #8e44ad); }"""
-BTN_ORANGE = """QPushButton { background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #d35400, stop:1 #f39c12); color: white; } 
-                QPushButton:hover { background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #a04000, stop:1 #d35400); }"""
-BTN_DARK = """QPushButton { background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #2c3e50, stop:1 #34495e); color: white; } 
-              QPushButton:hover { background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #1a252f, stop:1 #2c3e50); }"""
-
-def golge_ekle(widget):
-    shadow = QGraphicsDropShadowEffect()
-    shadow.setBlurRadius(20)
-    shadow.setXOffset(0)
-    shadow.setYOffset(5)
-    shadow.setColor(QColor(0, 0, 0, 40))
-    widget.setGraphicsEffect(shadow)
-
-# --- 1. VERİTABANI VE MANTIK ---
-DB_NAME = "seyahat_v27_iklim.db" 
-
-# İklim Tipi eklenmiş global rehber
-SEHIR_REHBERI = {
-    "İstanbul": {"iklim": "Ilıman", "yerler": "Ayasofya, Topkapı Sarayı, Galata Kulesi", "aktiviteler": "Boğaz turu yapmak, Kapalıçarşı'da alışveriş, Adalar'da bisiklet sürmek"},
-    "Ankara": {"iklim": "Ilıman", "yerler": "Anıtkabir, Ankara Kalesi, Kocatepe Camii", "aktiviteler": "Kuğulu Park'ta yürüyüş, müzeleri gezmek, Kale'de kahve içmek"},
-    "İzmir": {"iklim": "Sıcak", "yerler": "Saat Kulesi, Kemeraltı Çarşısı, Kordon", "aktiviteler": "Kordon'da çimlerde oturmak, boyoz tatmak, Efes Antik Kenti'ni keşfetmek"},
-    "Antalya": {"iklim": "Sıcak", "yerler": "Kaleiçi, Düden Şelalesi, Aspendos", "aktiviteler": "Konyaaltı'nda denize girmek, tekne turu, tarihi sokaklarda fotoğraf çekilmek"},
-    "Bursa": {"iklim": "Ilıman", "yerler": "Ulu Cami, Yeşil Türbe, Uludağ", "aktiviteler": "Teleferikle Uludağ'a çıkmak, İskender kebap yemek, Koza Han'da ipek bakmak"},
-    "Eskişehir": {"iklim": "Ilıman", "yerler": "Odunpazarı Evleri, Sazova Parkı, Porsuk Çayı", "aktiviteler": "Porsuk'ta gondol turu, lületaşı atölyelerini gezmek, çiğbörek denemek"},
-    "Trabzon": {"iklim": "Soğuk", "yerler": "Sümela Manastırı, Uzungöl, Boztepe", "aktiviteler": "Boztepe'de semaverde çay, yayla yürüyüşü, Karadeniz pidesi yemek"},
-    "Amsterdam": {"iklim": "Soğuk", "yerler": "Kanallar, Van Gogh Müzesi, Dam Meydanı", "aktiviteler": "Kanallarda tekne turu, bisikletle şehri gezmek, peynir tadımı yapmak"},
-    "Atina": {"iklim": "Sıcak", "yerler": "Akropolis, Parthenon, Plaka", "aktiviteler": "Tarihi kalıntıları fotoğraflamak, Yunan tavernalarında sirtaki izlemek"},
-    "Barselona": {"iklim": "Sıcak", "yerler": "La Sagrada Familia, Park Güell, La Rambla", "aktiviteler": "Gaudí mimarisini incelemek, Tapas ve Paella tatmak, plajda vakit geçirmek"},
-    "Belgrad": {"iklim": "Ilıman", "yerler": "Kalemegdan, Knez Mihailova", "aktiviteler": "Tuna ve Sava nehirlerinin birleşimini izlemek, gece hayatını deneyimlemek"},
-    "Berlin": {"iklim": "Soğuk", "yerler": "Brandenburg Kapısı, Berlin Duvarı, Reichstag", "aktiviteler": "Müzeler Adası'nı gezmek, sokak sanatlarını incelemek, Currywurst yemek"},
-    "Bratislava": {"iklim": "Ilıman", "yerler": "Bratislava Kalesi, St. Martin Katedrali", "aktiviteler": "Tuna nehri kıyısında yürüyüş, UFO köprüsüne çıkmak, eski şehri turlamak"},
-    "Brugge": {"iklim": "Soğuk", "yerler": "Belfry Kulesi, Çikolata Müzesi, Minnewater", "aktiviteler": "Ortaçağ sokaklarında kaybolmak, Belçika çikolatası atölyesine katılmak"},
-    "Brüksel": {"iklim": "Ilıman", "yerler": "Grand Place, Atomium, Manneken Pis", "aktiviteler": "Avrupa Parlamentosu'nu görmek, waffle ve midye yemek"},
-    "Budapeşte": {"iklim": "Ilıman", "yerler": "Parlamento Binası, Buda Kalesi, Zincir Köprü", "aktiviteler": "Tarihi termal hamamlara girmek, Tuna nehrinde akşam yemeği turu"},
-    "Bükreş": {"iklim": "Ilıman", "yerler": "Parlamento Sarayı, Eski Şehir", "aktiviteler": "Büyük parklarda bisiklet sürmek, geleneksel Rumen mutfağını tatmak"},
-    "Cenevre": {"iklim": "Soğuk", "yerler": "Cenevre Gölü, Jet d'Eau", "aktiviteler": "Göl etrafında piknik, İsviçre saat mağazalarını gezmek"},
-    "Dublin": {"iklim": "Soğuk", "yerler": "Guinness Storehouse, Temple Bar, Trinity College", "aktiviteler": "Canlı İrlanda müziği dinlemek, eski kütüphaneleri keşfetmek"},
-    "Edinburgh": {"iklim": "Soğuk", "yerler": "Edinburgh Kalesi, Royal Mile, Arthur's Seat", "aktiviteler": "Tepeden şehri izlemek, tarihi publarda vakit geçirmek, gayda dinlemek"},
-    "Roma": {"iklim": "Sıcak", "yerler": "Kolezyum, Trevi Çeşmesi, Pantheon, Vatikan", "aktiviteler": "Aşk çeşmesine para atmak, gladyatör arenasını gezmek, hakiki dondurma (Gelato) yemek"},
-    "Paris": {"iklim": "Ilıman", "yerler": "Eyfel Kulesi, Louvre Müzesi, Şanzelize", "aktiviteler": "Seine nehrinde tekne turu, kruvasan ve kahve keyfi, Mona Lisa'yı görmek"},
-    "New York": {"iklim": "Ilıman", "yerler": "Özgürlük Anıtı, Central Park, Times Meydanı", "aktiviteler": "Broadway şovu izlemek, Central Park'ta fayton turu, gökdelen tepesine çıkmak"},
-    "Tokyo": {"iklim": "Ilıman", "yerler": "Senso-ji, Shibuya Geçidi, Tokyo Skytree, Shinjuku", "aktiviteler": "Dünyanın en kalabalık yaya geçidinden geçmek, anime/manga bölgelerini gezmek, Sushi yemek"},
-    "Helsinki": {"iklim": "Soğuk", "yerler": "Suomenlinna, Senato Meydanı", "aktiviteler": "Deniz kalesini gezmek, geleneksel Fin saunasına girmek"},
-    "Kopenhag": {"iklim": "Soğuk", "yerler": "Tivoli Bahçeleri, Nyhavn, Küçük Deniz Kızı", "aktiviteler": "Eğlence parkında vakit geçirmek, renkli evlerin önünde fotoğraf çekilmek"},
-    "Oslo": {"iklim": "Soğuk", "yerler": "Vigeland Park, Viking Gemi Müzesi, Opera Binası", "aktiviteler": "Heykel parkında dolaşmak, Viking tarihini öğrenmek"},
-    "Dubai": {"iklim": "Sıcak", "yerler": "Burj Khalifa, Dubai Mall, Palm Jumeirah", "aktiviteler": "Çölde safari ve ATV turu, dünyanın en yüksek binasından manzarayı izlemek"},
-    "Miami": {"iklim": "Sıcak", "yerler": "South Beach, Everglades Ulusal Parkı, Little Havana", "aktiviteler": "Timsah turuna çıkmak, beyaz kumsallarda yüzmek, Küba kahvesi içmek"},
-    "Singapur": {"iklim": "Sıcak", "yerler": "Marina Bay Sands, Gardens by the Bay, Universal Studios", "aktiviteler": "Işıklı dev yapay ağaçların gösterisini izlemek, gece safarisine katılmak"}
-}
-
-# --- İKLİME DUYARLI YENİ HAVA DURUMU MOTORU ---
-def dinamik_hava_durumu_getir(sehir, tarih_str, iklim="Ilıman"):
-    random.seed(sehir + tarih_str)
-    try: ay = int(tarih_str.split('.')[1])
-    except: ay = 5 
+# ================= VERİ TABANI =================
+class DB:
+    def __init__(self):
+        # Eski veritabanını sil
+        if os.path.exists("travel_pro.db"):
+            os.remove("travel_pro.db")
         
-    # Şehrin iklim tipine göre taban sıcaklığı (Base Temperature) belirlenir
-    if iklim == "Soğuk":
-        if ay in [12, 1, 2]: base = random.randint(-15, -2)
-        elif ay in [3, 4, 10, 11]: base = random.randint(-5, 8)
-        else: base = random.randint(10, 18)
-    elif iklim == "Sıcak":
-        if ay in [12, 1, 2]: base = random.randint(15, 22)
-        elif ay in [3, 4, 10, 11]: base = random.randint(22, 30)
-        else: base = random.randint(30, 42)
-    else: # Ilıman
-        if ay in [12, 1, 2]: base = random.randint(0, 10)
-        elif ay in [3, 4, 10, 11]: base = random.randint(10, 20)
-        else: base = random.randint(22, 32)
-    
-    temp = base + random.randint(-3, 3)
-    
-    durumlar = ["Güneşli ☀️", "Parçalı Bulutlu ⛅", "Sağanak Yağışlı 🌧️", "Açık 🌤️", "Bulutlu ☁️"]
-    if temp < 5: 
-        durumlar.extend(["Karlı ❄️", "Yoğun Kar Yağışlı 🌨️", "Sulu Kar 🌨️", "Buzlanma 🧊"])
-    elif temp > 30:
-        durumlar.extend(["Çok Sıcak 🌡️", "Bunaltıcı Nem 💧"])
-        
-    secilen_durum = random.choice(durumlar)
-    random.seed() 
-    return f"{temp}°C, {secilen_durum}"
+        self.conn = sqlite3.connect("travel_pro.db")
+        self.cur = self.conn.cursor()
+        self.init_db()
+        self.ornek_verileri_yukle()
 
-def veritabani_hazirla():
-    with sqlite3.connect(DB_NAME) as baglanti:
-        cursor = baglanti.cursor()
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS kullanicilar (
+    def init_db(self):
+        # Seyahatler tablosu
+        self.cur.execute("""
+        CREATE TABLE IF NOT EXISTS trips (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            kullanici_adi TEXT UNIQUE NOT NULL,
-            sifre TEXT NOT NULL,
-            ad_soyad TEXT,
-            telefon TEXT,
-            dogum_tarihi TEXT,
-            bakiye REAL DEFAULT 25000.0
-        )""")
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS seferler (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            kalkis TEXT NOT NULL,
-            varis TEXT NOT NULL,
-            tarih TEXT NOT NULL,
-            saat TEXT NOT NULL,
-            fiyat REAL NOT NULL,
-            kapasite INTEGER DEFAULT 40,
-            durum TEXT DEFAULT 'Planlandı'
-        )""")
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS biletler (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            kullanici_id INTEGER,
-            sefer_id INTEGER,
-            koltuk_no INTEGER,
-            odenen_tutar REAL,
-            UNIQUE(sefer_id, koltuk_no)
-        )""")
-        # İKLİM SÜTUNU EKLENDİ
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS sehirler (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            isim TEXT UNIQUE NOT NULL,
-            yerler TEXT NOT NULL,
-            aktiviteler TEXT NOT NULL,
-            iklim TEXT DEFAULT 'Ilıman'
-        )""")
-        baglanti.commit()
-    admin_olustur()
-    sehirleri_veritabanina_aktar()
-    ornek_seferleri_yukle()
-    ornek_yolculari_ve_biletleri_yukle()
-
-def sehirleri_veritabanina_aktar():
-    with sqlite3.connect(DB_NAME) as baglanti:
-        cursor = baglanti.cursor()
-        cursor.execute("SELECT COUNT(*) FROM sehirler")
-        if cursor.fetchone()[0] == 0:
-            for isim, detay in SEHIR_REHBERI.items():
-                iklim = detay.get("iklim", "Ilıman")
-                aktivite = detay.get("aktiviteler", "Aktivite bulunmuyor.")
-                cursor.execute("INSERT INTO sehirler (isim, yerler, aktiviteler, iklim) VALUES (?, ?, ?, ?)", 
-                               (isim, detay["yerler"], aktivite, iklim))
-            baglanti.commit()
-
-def sehir_isimlerini_getir():
-    with sqlite3.connect(DB_NAME) as baglanti:
-        cursor = baglanti.cursor()
-        cursor.execute("SELECT isim FROM sehirler ORDER BY isim ASC")
-        return [row[0] for row in cursor.fetchall()]
-
-def sehir_detay_getir(sehir_adi):
-    with sqlite3.connect(DB_NAME) as baglanti:
-        cursor = baglanti.cursor()
-        cursor.execute("SELECT yerler, aktiviteler, iklim FROM sehirler WHERE isim = ?", (sehir_adi,))
-        sonuc = cursor.fetchone()
-        if sonuc: return {"yerler": sonuc[0], "aktiviteler": sonuc[1], "iklim": sonuc[2]}
-        return {"yerler": "Bilinmiyor", "aktiviteler": "Bilinmiyor", "iklim": "Ilıman"}
-
-def sehir_ekle_db(isim, yerler, aktiviteler, iklim):
-    try:
-        with sqlite3.connect(DB_NAME) as baglanti:
-            cursor = baglanti.cursor()
-            isim = isim.strip().title()
-            cursor.execute("INSERT INTO sehirler (isim, yerler, aktiviteler, iklim) VALUES (?, ?, ?, ?)", (isim, yerler, aktiviteler, iklim))
-            baglanti.commit()
-            return True
-    except: return False
-
-def admin_olustur():
-    k_adi, sifre = "admin", "1234"
-    sifre_hash = sha256(sifre.encode()).hexdigest()
-    with sqlite3.connect(DB_NAME) as baglanti:
-        cursor = baglanti.cursor()
-        cursor.execute("SELECT * FROM kullanicilar WHERE kullanici_adi = ?", (k_adi,))
-        if not cursor.fetchone():
-            cursor.execute("INSERT INTO kullanicilar (kullanici_adi, sifre, ad_soyad, telefon, dogum_tarihi, bakiye) VALUES (?, ?, ?, ?, ?, ?)", 
-                           (k_adi, sifre_hash, "Sistem Yöneticisi", "00000000000", "01.01.1990", 999999.0))
-            baglanti.commit()
-
-def ornek_seferleri_yukle():
-    with sqlite3.connect(DB_NAME) as baglanti:
-        cursor = baglanti.cursor()
-        cursor.execute("SELECT COUNT(*) FROM seferler")
-        if cursor.fetchone()[0] == 0:
-            ornekler = []
-            sehirler_listesi = sehir_isimlerini_getir()
-            for _ in range(60):
-                kalkis = random.choice(sehirler_listesi)
-                varis = random.choice(sehirler_listesi)
-                while kalkis == varis: varis = random.choice(sehirler_listesi)
-                
-                ay = random.choice([4, 5, 6]) 
-                gun = random.randint(1, 28)
-                tarih = f"{gun:02d}.{ay:02d}.2026"
-                saat = f"{random.randint(0, 23):02d}:{random.choice(['00', '15', '30', '45'])}"
-                fiyat = float(random.randint(15, 350) * 100) 
-                ornekler.append((kalkis, varis, tarih, saat, fiyat))
-            for s in ornekler:
-                cursor.execute("INSERT INTO seferler (kalkis, varis, tarih, saat, fiyat) VALUES (?, ?, ?, ?, ?)", s)
-            baglanti.commit()
-
-def ornek_yolculari_ve_biletleri_yukle():
-    with sqlite3.connect(DB_NAME) as baglanti:
-        cursor = baglanti.cursor()
-        cursor.execute("SELECT COUNT(*) FROM kullanicilar WHERE kullanici_adi != 'admin'")
-        if cursor.fetchone()[0] == 0:
-            isimler = ["Ahmet", "Mehmet", "Ali", "Veli", "Can", "Ece", "Elif", "Zeynep", "Murat", "Burak", "Hakan", "Selin", "Aslı", "Deniz"]
-            soyisimler = ["Yılmaz", "Kaya", "Demir", "Çelik", "Şahin", "Yıldız", "Öztürk", "Arslan", "Aydın"]
-            sifre_hash = sha256("1234".encode()).hexdigest()
-            yolcu_idleri = []
-            for i in range(1, 101):
-                k_adi = f"yolcu{i}"
-                ad = random.choice(isimler) + " " + random.choice(soyisimler)
-                tel = f"0555{random.randint(1000000, 9999999)}"
-                dt = f"{random.randint(1,28):02d}.{random.randint(1,12):02d}.{random.randint(1980,2010)}"
-                cursor.execute("INSERT INTO kullanicilar (kullanici_adi, sifre, ad_soyad, telefon, dogum_tarihi, bakiye) VALUES (?, ?, ?, ?, ?, ?)",
-                               (k_adi, sifre_hash, ad, tel, dt, 500000.0))
-                yolcu_idleri.append(cursor.lastrowid)
-            
-            cursor.execute("SELECT id, fiyat FROM seferler")
-            seferler = cursor.fetchall()
-            for sefer in seferler:
-                sefer_id, fiyat = sefer
-                yolcu_sayisi = random.randint(10, 35)
-                secilen_yolcular = random.sample(yolcu_idleri, yolcu_sayisi)
-                koltuklar = random.sample(range(1, 41), yolcu_sayisi)
-                for i in range(yolcu_sayisi):
-                    try:
-                        cursor.execute("UPDATE kullanicilar SET bakiye = bakiye - ? WHERE id = ?", (fiyat, secilen_yolcular[i]))
-                        cursor.execute("INSERT INTO biletler (kullanici_id, sefer_id, koltuk_no, odenen_tutar) VALUES (?, ?, ?, ?)",
-                                       (secilen_yolcular[i], sefer_id, koltuklar[i], fiyat))
-                    except: pass
-            baglanti.commit()
-
-def kullanici_kaydet(k_adi, sifre, ad_soyad, telefon, d_tarihi):
-    sifre_hash = sha256(sifre.encode()).hexdigest()
-    try:
-        with sqlite3.connect(DB_NAME) as baglanti:
-            cursor = baglanti.cursor()
-            cursor.execute("INSERT INTO kullanicilar (kullanici_adi, sifre, ad_soyad, telefon, dogum_tarihi) VALUES (?, ?, ?, ?, ?)", 
-                           (k_adi, sifre_hash, ad_soyad, telefon, d_tarihi))
-            baglanti.commit()
-            return True
-    except: return False
-
-def kullanici_kontrol(k_adi, sifre):
-    sifre_hash = sha256(sifre.encode()).hexdigest()
-    try:
-        with sqlite3.connect(DB_NAME) as baglanti:
-            cursor = baglanti.cursor()
-            cursor.execute("SELECT * FROM kullanicilar WHERE kullanici_adi = ? AND sifre = ?", (k_adi, sifre_hash))
-            return cursor.fetchone()
-    except: return None
-
-def kullanici_getir_by_id(uid):
-    with sqlite3.connect(DB_NAME) as baglanti:
-        cursor = baglanti.cursor()
-        cursor.execute("SELECT * FROM kullanicilar WHERE id = ?", (uid,))
-        return cursor.fetchone()
-
-def bakiye_artir(uid, miktar):
-    try:
-        with sqlite3.connect(DB_NAME) as baglanti:
-            cursor = baglanti.cursor()
-            cursor.execute("UPDATE kullanicilar SET bakiye = bakiye + ? WHERE id = ?", (miktar, uid))
-            baglanti.commit()
-            return True
-    except: return False
-
-def seferleri_getir():
-    with sqlite3.connect(DB_NAME) as baglanti:
-        cursor = baglanti.cursor()
-        cursor.execute("SELECT id, kalkis, varis, tarih, saat, fiyat, durum FROM seferler")
-        seferler = cursor.fetchall()
-        
-        guncel_seferler = []
-        bugun = QDate.currentDate()
-        suan = QTime.currentTime()
-        
-        for s in seferler:
-            s_list = list(s)
-            if s_list[6] == 'Planlandı':
-                s_tarih = QDate.fromString(s_list[3], "dd.MM.yyyy")
-                s_saat = QTime.fromString(s_list[4], "HH:mm")
-                if s_tarih < bugun or (s_tarih == bugun and s_saat <= suan):
-                    s_list[6] = 'Tamamlandı'
-                    cursor.execute("UPDATE seferler SET durum = 'Tamamlandı' WHERE id = ?", (s_list[0],))
-            guncel_seferler.append(tuple(s_list))
-            
-        baglanti.commit()
-        return guncel_seferler
-
-def sefer_ekle(k, v, t, s, f):
-    try:
-        with sqlite3.connect(DB_NAME) as baglanti:
-            cursor = baglanti.cursor()
-            cursor.execute("INSERT INTO seferler (kalkis, varis, tarih, saat, fiyat, durum) VALUES (?, ?, ?, ?, ?, 'Planlandı')", (k, v, t, s, f))
-            baglanti.commit()
-            return True
-    except: return False
-
-def sefer_sil(sefer_id):
-    try:
-        with sqlite3.connect(DB_NAME) as baglanti:
-            cursor = baglanti.cursor()
-            cursor.execute("SELECT kullanici_id, odenen_tutar FROM biletler WHERE sefer_id = ?", (sefer_id,))
-            satilan_biletler = cursor.fetchall()
-            for bilet in satilan_biletler:
-                cursor.execute("UPDATE kullanicilar SET bakiye = bakiye + ? WHERE id = ?", (bilet[1], bilet[0]))
-            cursor.execute("DELETE FROM biletler WHERE sefer_id = ?", (sefer_id,))
-            cursor.execute("UPDATE seferler SET durum = 'İptal Edildi' WHERE id = ?", (sefer_id,))
-            baglanti.commit()
-            return True, f"Sefer iptal edildi. {len(satilan_biletler)} yolcuya iade yapıldı."
-    except Exception as e: return False, str(e)
-
-def dolu_koltuklari_getir(sefer_id):
-    with sqlite3.connect(DB_NAME) as baglanti:
-        cursor = baglanti.cursor()
-        cursor.execute("SELECT koltuk_no FROM biletler WHERE sefer_id = ?", (sefer_id,))
-        return [row[0] for row in cursor.fetchall()]
-
-def bilet_satin_al(k_id, s_id, koltuk_no, fiyat):
-    try:
-        with sqlite3.connect(DB_NAME) as baglanti:
-            cursor = baglanti.cursor()
-            cursor.execute("SELECT bakiye FROM kullanicilar WHERE id = ?", (k_id,))
-            bakiye = cursor.fetchone()[0]
-            if bakiye < fiyat: return False, "Yetersiz bakiye!"
-            cursor.execute("UPDATE kullanicilar SET bakiye = bakiye - ? WHERE id = ?", (fiyat, k_id))
-            cursor.execute("INSERT INTO biletler (kullanici_id, sefer_id, koltuk_no, odenen_tutar) VALUES (?, ?, ?, ?)", (k_id, s_id, koltuk_no, fiyat))
-            baglanti.commit()
-            return True, "Bilet başarıyla alındı!"
-    except sqlite3.IntegrityError: return False, "Koltuk dolu!"
-    except Exception as e: return False, str(e)
-
-def kullanici_biletlerini_getir(k_id):
-    with sqlite3.connect(DB_NAME) as baglanti:
-        cursor = baglanti.cursor()
-        sorgu = "SELECT b.id, s.kalkis, s.varis, s.tarih, s.saat, b.koltuk_no, b.odenen_tutar, s.durum FROM biletler b JOIN seferler s ON b.sefer_id = s.id WHERE b.kullanici_id = ?"
-        cursor.execute(sorgu, (k_id,))
-        return cursor.fetchall()
-
-def bilet_iptal_et(bilet_id):
-    try:
-        with sqlite3.connect(DB_NAME) as baglanti:
-            cursor = baglanti.cursor()
-            cursor.execute("SELECT kullanici_id, odenen_tutar FROM biletler WHERE id = ?", (bilet_id,))
-            row = cursor.fetchone()
-            if not row: return False, "Bilet bulunamadı!"
-            k_id, iade_tutari = row
-            cursor.execute("DELETE FROM biletler WHERE id = ?", (bilet_id,))
-            cursor.execute("UPDATE kullanicilar SET bakiye = bakiye + ? WHERE id = ?", (iade_tutari, k_id))
-            baglanti.commit()
-            return True, f"Bilet iptal edildi.\n{iade_tutari:.2f} TL hesabınıza iade edilmiştir."
-    except Exception as e: return False, f"İptal işlemi başarısız: {e}"
-
-def sefer_yolculari_getir(sefer_id):
-    with sqlite3.connect(DB_NAME) as baglanti:
-        cursor = baglanti.cursor()
-        sorgu = """
-        SELECT b.koltuk_no, k.ad_soyad, k.telefon, b.odenen_tutar 
-        FROM biletler b JOIN kullanicilar k ON b.kullanici_id = k.id 
-        WHERE b.sefer_id = ? ORDER BY b.koltuk_no ASC
-        """
-        cursor.execute(sorgu, (sefer_id,))
-        return cursor.fetchall()
-
-def donus_bileti_kontrol_et(kullanici_id, kalkis, varis, donus_tarih_str):
-    with sqlite3.connect(DB_NAME) as baglanti:
-        cursor = baglanti.cursor()
-        sorgu = """
-        SELECT b.koltuk_no, s.tarih FROM biletler b 
-        JOIN seferler s ON b.sefer_id = s.id 
-        WHERE b.kullanici_id = ? AND s.kalkis = ? AND s.varis = ? AND s.durum != 'İptal Edildi'
-        """
-        cursor.execute(sorgu, (kullanici_id, varis, kalkis))
-        gidis_biletleri = cursor.fetchall()
-        d_tarih = QDate.fromString(donus_tarih_str, "dd.MM.yyyy")
-        for bilet in gidis_biletleri:
-            g_tarih = QDate.fromString(bilet[1], "dd.MM.yyyy")
-            if d_tarih >= g_tarih: return bilet[0]
-        return None
-
-# --- 2. DİALOG VE YAN BİLEŞENLER ---
-class PasswordField(QWidget):
-    def __init__(self, placeholder):
-        super().__init__()
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        
-        self.input = QLineEdit()
-        self.input.setPlaceholderText(placeholder)
-        self.input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.input.setStyleSheet("border-top-right-radius: 0px; border-bottom-right-radius: 0px; border-right: none;")
-        self.input.setMinimumHeight(55)
-        
-        self.btn = QPushButton("👁")
-        self.btn.setFixedWidth(55)
-        self.btn.setMinimumHeight(55)
-        self.btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f8f9fa; 
-                border: 2px solid #e0e6ed; 
-                border-left: none; 
-                border-top-left-radius: 0px; 
-                border-bottom-left-radius: 0px;
-                border-top-right-radius: 8px;
-                border-bottom-right-radius: 8px;
-                color: #2c3e50;
-                font-size: 18px;
-            }
-            QPushButton:hover { background-color: #eaeded; }
+            city TEXT,
+            country TEXT,
+            start_date TEXT,
+            end_date TEXT,
+            budget REAL,
+            status TEXT
+        )
         """)
-        self.btn.pressed.connect(lambda: self.input.setEchoMode(QLineEdit.EchoMode.Normal))
-        self.btn.released.connect(lambda: self.input.setEchoMode(QLineEdit.EchoMode.Password))
-        
-        layout.addWidget(self.input)
-        layout.addWidget(self.btn)
 
-class SehirDetayPenceresi(QDialog):
-    def __init__(self, sehir, tarih, parent=None):
+        # Oteller tablosu
+        self.cur.execute("""
+        CREATE TABLE IF NOT EXISTS hotels (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trip_id INTEGER,
+            name TEXT,
+            price REAL,
+            check_in TEXT,
+            check_out TEXT
+        )
+        """)
+
+        # Planlar tablosu
+        self.cur.execute("""
+        CREATE TABLE IF NOT EXISTS plans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trip_id INTEGER,
+            day TEXT,
+            activity TEXT,
+            location TEXT,
+            time TEXT
+        )
+        """)
+
+        # Harcamalar tablosu
+        self.cur.execute("""
+        CREATE TABLE IF NOT EXISTS expenses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trip_id INTEGER,
+            category TEXT,
+            amount REAL,
+            date TEXT,
+            description TEXT
+        )
+        """)
+
+        self.conn.commit()
+
+    def ornek_verileri_yukle(self):
+        # 20 şehir ve ülke verisi
+        destinations = [
+            ("İstanbul", "Türkiye", 15000, "Planlandı"),
+            ("Paris", "Fransa", 25000, "Devam Ediyor"),
+            ("Londra", "İngiltere", 30000, "Tamamlandı"),
+            ("Roma", "İtalya", 20000, "Planlandı"),
+            ("Barselona", "İspanya", 18000, "Devam Ediyor"),
+            ("Amsterdam", "Hollanda", 22000, "Tamamlandı"),
+            ("Berlin", "Almanya", 16000, "Planlandı"),
+            ("Viyana", "Avusturya", 19000, "İptal Edildi"),
+            ("Prag", "Çekya", 14000, "Planlandı"),
+            ("Budapeşte", "Macaristan", 12000, "Devam Ediyor"),
+            ("Dubai", "BAE", 35000, "Planlandı"),
+            ("Tokyo", "Japonya", 45000, "Planlandı"),
+            ("New York", "ABD", 40000, "Tamamlandı"),
+            ("Bangkok", "Tayland", 15000, "Devam Ediyor"),
+            ("Singapur", "Singapur", 28000, "Planlandı"),
+            ("Sydney", "Avustralya", 38000, "Planlandı"),
+            ("Kapadokya", "Türkiye", 10000, "Tamamlandı"),
+            ("Antalya", "Türkiye", 8000, "Devam Ediyor"),
+            ("Selanik", "Yunanistan", 7000, "Planlandı"),
+            ("Kahire", "Mısır", 12000, "Planlandı")
+        ]
+        
+        # Otel isimleri
+        hotel_names = [
+            "Hilton", "Marriott", "Sheraton", "Ritz Carlton", "Four Seasons",
+            "Radisson Blu", "Holiday Inn", "Best Western", "Swissotel", "InterContinental"
+        ]
+        
+        # Aktivite seçenekleri
+        activities = [
+            ("Şehir Turu", "Şehir Merkezi"),
+            ("Müze Ziyareti", "Tarihi Bölge"),
+            ("Yemek Turu", "Restoranlar Bölgesi"),
+            ("Alışveriş", "Alışveriş Merkezi"),
+            ("Doğa Yürüyüşü", "Park Alanı"),
+            ("Plaj Keyfi", "Sahil"),
+            ("Gece Hayatı", "Eğlence Merkezi"),
+            ("Tarihi Gezi", "Tarihi Mekanlar")
+        ]
+        
+        # Harcama kategorileri
+        expense_categories = ["Konaklama", "Yemek", "Ulaşım", "Aktivite", "Alışveriş", "Diğer"]
+        
+        # 20 seyahat oluştur
+        for city, country, base_budget, status in destinations:
+            # Rastgele tarihler
+            start_offset = randint(-30, 60)
+            start_date = datetime.now() + timedelta(days=start_offset)
+            duration = randint(3, 14)
+            end_date = start_date + timedelta(days=duration)
+            
+            # Bütçe varyasyonu
+            budget = base_budget + randint(-3000, 5000)
+            budget = max(5000, budget)
+            
+            # Seyahati ekle
+            self.cur.execute("""
+            INSERT INTO trips(city, country, start_date, end_date, budget, status)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """, (city, country, start_date.strftime("%Y-%m-%d"),
+                  end_date.strftime("%Y-%m-%d"), budget, status))
+            trip_id = self.cur.lastrowid
+            
+            # 1-2 otel ekle
+            num_hotels = randint(1, 2)
+            for _ in range(num_hotels):
+                hotel_name = choice(hotel_names) + " " + city
+                hotel_price = randint(500, 4000) * duration
+                check_in = start_date + timedelta(days=randint(0, max(0, duration-2)))
+                check_out = check_in + timedelta(days=randint(1, min(3, duration)))
+                self.cur.execute("""
+                INSERT INTO hotels(trip_id, name, price, check_in, check_out)
+                VALUES (?, ?, ?, ?, ?)
+                """, (trip_id, hotel_name, hotel_price,
+                      check_in.strftime("%Y-%m-%d"), check_out.strftime("%Y-%m-%d")))
+            
+            # 3-6 aktivite ekle
+            num_activities = randint(3, 6)
+            for day_num in range(1, min(duration + 1, num_activities + 1)):
+                activity, location = choice(activities)
+                time_slot = choice(["09:00", "11:00", "14:00", "16:00", "19:00", "21:00"])
+                self.cur.execute("""
+                INSERT INTO plans(trip_id, day, activity, location, time)
+                VALUES (?, ?, ?, ?, ?)
+                """, (trip_id, f"{day_num}. Gün", activity, location, time_slot))
+            
+            # 5-10 harcama ekle
+            num_expenses = randint(5, 10)
+            for _ in range(num_expenses):
+                category = choice(expense_categories)
+                amount = randint(50, 1500)
+                expense_date = start_date + timedelta(days=randint(0, duration-1))
+                self.cur.execute("""
+                INSERT INTO expenses(trip_id, category, amount, date, description)
+                VALUES (?, ?, ?, ?, ?)
+                """, (trip_id, category, amount, expense_date.strftime("%Y-%m-%d"),
+                      f"{category} harcaması"))
+        
+        self.conn.commit()
+        print(f"{len(destinations)} adet örnek seyahat başarıyla yüklendi!")
+
+    # ---------- SEYAHAT İŞLEMLERİ ----------
+    def add_trip(self, city, country, start, end, budget, status="Planlandı"):
+        self.cur.execute("""
+        INSERT INTO trips(city, country, start_date, end_date, budget, status)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """, (city, country, start, end, budget, status))
+        self.conn.commit()
+        return self.cur.lastrowid
+
+    def get_trips(self):
+        return self.cur.execute("SELECT * FROM trips ORDER BY start_date DESC").fetchall()
+
+    def get_trip_by_id(self, tid):
+        return self.cur.execute("SELECT * FROM trips WHERE id=?", (tid,)).fetchone()
+
+    def update_trip(self, tid, city, country, start, end, budget, status):
+        self.cur.execute("""
+        UPDATE trips SET city=?, country=?, start_date=?, end_date=?, budget=?, status=?
+        WHERE id=?
+        """, (city, country, start, end, budget, status, tid))
+        self.conn.commit()
+
+    def delete_trip(self, tid):
+        self.cur.execute("DELETE FROM trips WHERE id=?", (tid,))
+        self.conn.commit()
+
+    # ---------- OTEL İŞLEMLERİ ----------
+    def add_hotel(self, trip_id, name, price, check_in, check_out):
+        self.cur.execute("""
+        INSERT INTO hotels(trip_id, name, price, check_in, check_out)
+        VALUES (?, ?, ?, ?, ?)
+        """, (trip_id, name, price, check_in, check_out))
+        self.conn.commit()
+
+    def get_hotels_by_trip(self, trip_id):
+        return self.cur.execute("SELECT * FROM hotels WHERE trip_id=?", (trip_id,)).fetchall()
+
+    def delete_hotel(self, hid):
+        self.cur.execute("DELETE FROM hotels WHERE id=?", (hid,))
+        self.conn.commit()
+
+    # ---------- PLAN İŞLEMLERİ ----------
+    def add_plan(self, trip_id, day, activity, location, time=""):
+        self.cur.execute("""
+        INSERT INTO plans(trip_id, day, activity, location, time)
+        VALUES (?, ?, ?, ?, ?)
+        """, (trip_id, day, activity, location, time))
+        self.conn.commit()
+
+    def get_plans_by_trip(self, trip_id):
+        return self.cur.execute("SELECT * FROM plans WHERE trip_id=? ORDER BY day, time", (trip_id,)).fetchall()
+
+    def delete_plan(self, pid):
+        self.cur.execute("DELETE FROM plans WHERE id=?", (pid,))
+        self.conn.commit()
+
+    # ---------- HARCAMA İŞLEMLERİ ----------
+    def add_expense(self, trip_id, category, amount, date, description=""):
+        self.cur.execute("""
+        INSERT INTO expenses(trip_id, category, amount, date, description)
+        VALUES (?, ?, ?, ?, ?)
+        """, (trip_id, category, amount, date, description))
+        self.conn.commit()
+
+    def get_expenses_by_trip(self, trip_id):
+        return self.cur.execute("SELECT * FROM expenses WHERE trip_id=? ORDER BY date DESC", (trip_id,)).fetchall()
+
+    def delete_expense(self, eid):
+        self.cur.execute("DELETE FROM expenses WHERE id=?", (eid,))
+        self.conn.commit()
+
+    def get_trip_expense_total(self, trip_id):
+        result = self.cur.execute("SELECT SUM(amount) FROM expenses WHERE trip_id=?", (trip_id,)).fetchone()[0]
+        return result or 0
+
+    def get_hotel_total_by_trip(self, trip_id):
+        result = self.cur.execute("SELECT SUM(price) FROM hotels WHERE trip_id=?", (trip_id,)).fetchone()[0]
+        return result or 0
+
+    # ---------- İSTATİSTİKLER ----------
+    def total_budget(self):
+        result = self.cur.execute("SELECT SUM(budget) FROM trips").fetchone()[0]
+        return result or 0
+
+    def total_expenses(self):
+        result = self.cur.execute("SELECT SUM(amount) FROM expenses").fetchone()[0]
+        return result or 0
+
+    def total_hotel_cost(self):
+        result = self.cur.execute("SELECT SUM(price) FROM hotels").fetchone()[0]
+        return result or 0
+
+    def get_trip_count_by_status(self):
+        return {
+            'planned': self.cur.execute("SELECT COUNT(*) FROM trips WHERE status='Planlandı'").fetchone()[0],
+            'ongoing': self.cur.execute("SELECT COUNT(*) FROM trips WHERE status='Devam Ediyor'").fetchone()[0],
+            'completed': self.cur.execute("SELECT COUNT(*) FROM trips WHERE status='Tamamlandı'").fetchone()[0],
+            'cancelled': self.cur.execute("SELECT COUNT(*) FROM trips WHERE status='İptal Edildi'").fetchone()[0]
+        }
+
+    def get_upcoming_trips(self, limit=5):
+        today = datetime.now().strftime("%Y-%m-%d")
+        return self.cur.execute("""
+        SELECT * FROM trips WHERE start_date >= ? AND status != 'Tamamlandı'
+        ORDER BY start_date LIMIT ?
+        """, (today, limit)).fetchall()
+
+
+# ================= SEYAHAT DETAY DİYALOĞU =================
+class TripDetailDialog(QDialog):
+    def __init__(self, db, trip_id, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"{sehir} Şehir Rehberi")
-        self.setFixedSize(500, 360)
-        self.setStyleSheet("background-color: white; border-radius: 10px;")
-        golge_ekle(self)
-        
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(25, 25, 25, 25)
-        layout.setSpacing(15)
-        
-        veriler = sehir_detay_getir(sehir)
-        iklim_tipi = veriler.get("iklim", "Ilıman")
-        
-        # İKLİM TİPİ VERİLERE EKLENDİ
-        guncel_hava = dinamik_hava_durumu_getir(sehir, tarih, iklim_tipi)
-        
-        lbl_baslik = QLabel(f"<h1 style='color:#2980b9; margin:0;'>🌍 {sehir}</h1>")
-        lbl_baslik.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(lbl_baslik)
-        
-        lbl_hava = QLabel(f"<span style='font-size:15px; color:#d35400;'><b>🌤 {tarih} Uçuşu İçin Canlı Hava Tahmini:</b><br>{guncel_hava} ({iklim_tipi} İklim)</span>")
-        lbl_hava.setStyleSheet("background-color: #fdf2e9; padding: 10px; border-radius: 8px;")
-        layout.addWidget(lbl_hava)
-        
-        lbl_yerler = QLabel(f"<span style='font-size:15px; color:#34495e;'><b>📍 Gezilecek Yerler:</b><br>{veriler['yerler']}</span>")
-        lbl_yerler.setWordWrap(True)
-        layout.addWidget(lbl_yerler)
-        
-        lbl_akt = QLabel(f"<span style='font-size:15px; color:#27ae60;'><b>🎯 Yapılabilecek Aktiviteler:</b><br>{veriler['aktiviteler']}</span>")
-        lbl_akt.setWordWrap(True)
-        layout.addWidget(lbl_akt)
-        
-        layout.addStretch()
-        
-        btn = QPushButton("Kapat")
-        btn.setStyleSheet(BTN_DARK)
-        btn.clicked.connect(self.close)
-        layout.addWidget(btn)
+        self.db = db
+        self.trip_id = trip_id
+        self.trip = db.get_trip_by_id(trip_id)
+        self.setWindowTitle(f"Seyahat Detayları - {self.trip[1]}")
+        self.setGeometry(300, 200, 900, 700)
+        self.setModal(True)
+        self.setup_ui()
 
-class BiletCiktisiPenceresi(QDialog):
-    def __init__(self, bilet_detay, yolcu_adi, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("✈️ Dijital Biniş Kartı")
-        self.setFixedSize(520, 340)
-        self.setStyleSheet("background-color: #fdfdfd; border-radius: 12px; border: 2px dashed #3498db;")
-        golge_ekle(self)
-        
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(30, 30, 30, 30)
+    def setup_ui(self):
+        layout = QVBoxLayout()
+        self.setLayout(layout)
 
-        lbl_baslik = QLabel("<h2 style='color:#2980b9; margin:0; text-align:center;'>SKYBOUND AIRLINES</h2><p style='color:#7f8c8d; margin:0; text-align:center;'>Biniş Kartı / Boarding Pass</p>")
-        lbl_baslik.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(lbl_baslik)
-        
-        layout.addSpacing(15)
+        tabs = QTabWidget()
 
-        bilgi_html = f"""
-        <table width='100%' style='font-size:15px; color:#2c3e50;'>
-            <tr>
-                <td style='padding-bottom:12px;'><b>Yolcu:</b> {yolcu_adi}</td>
-                <td style='padding-bottom:12px;'><b>Koltuk:</b> <span style='color:#d35400; font-weight:bold;'>{bilet_detay[5]}</span></td>
-            </tr>
-            <tr>
-                <td style='padding-bottom:12px;'><b>Kalkış:</b> {bilet_detay[1]}</td>
-                <td style='padding-bottom:12px;'><b>Varış:</b> {bilet_detay[2]}</td>
-            </tr>
-            <tr>
-                <td style='padding-bottom:12px;'><b>Tarih:</b> {bilet_detay[3]}</td>
-                <td style='padding-bottom:12px;'><b>Saat:</b> {bilet_detay[4]}</td>
-            </tr>
-            <tr>
-                <td colspan='2' style='padding-top:12px; border-top:1px solid #ecf0f1;'>
-                    <b style='color:#27ae60;'>Ödenen Tutar:</b> {bilet_detay[6]:.2f} TL
-                </td>
-            </tr>
+        self.create_info_tab(tabs)
+        self.create_hotels_tab(tabs)
+        self.create_plan_tab(tabs)
+        self.create_expenses_tab(tabs)
+        self.create_summary_tab(tabs)
+
+        layout.addWidget(tabs)
+
+        btn_close = QPushButton("Kapat")
+        btn_close.clicked.connect(self.accept)
+        btn_close.setFixedWidth(100)
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        btn_layout.addWidget(btn_close)
+        layout.addLayout(btn_layout)
+
+    def create_info_tab(self, tabs):
+        widget = QWidget()
+        layout = QFormLayout()
+
+        city_edit = QLineEdit(self.trip[1])
+        country_edit = QLineEdit(self.trip[2])
+        start_edit = QDateEdit()
+        start_edit.setDate(QDate.fromString(self.trip[3], "yyyy-MM-dd"))
+        start_edit.setCalendarPopup(True)
+        end_edit = QDateEdit()
+        end_edit.setDate(QDate.fromString(self.trip[4], "yyyy-MM-dd"))
+        end_edit.setCalendarPopup(True)
+        budget_edit = QDoubleSpinBox()
+        budget_edit.setRange(0, 1000000)
+        budget_edit.setValue(self.trip[5])
+
+        status_combo = QComboBox()
+        status_combo.addItems(["Planlandı", "Devam Ediyor", "Tamamlandı", "İptal Edildi"])
+        status_combo.setCurrentText(self.trip[6])
+
+        layout.addRow("Şehir:", city_edit)
+        layout.addRow("Ülke:", country_edit)
+        layout.addRow("Başlangıç Tarihi:", start_edit)
+        layout.addRow("Bitiş Tarihi:", end_edit)
+        layout.addRow("Bütçe (TL):", budget_edit)
+        layout.addRow("Durum:", status_combo)
+
+        btn_save = QPushButton("Değişiklikleri Kaydet")
+        btn_save.clicked.connect(lambda: self.save_trip_info(
+            city_edit.text(), country_edit.text(),
+            start_edit.date().toString("yyyy-MM-dd"),
+            end_edit.date().toString("yyyy-MM-dd"),
+            budget_edit.value(), status_combo.currentText()
+        ))
+        layout.addRow(btn_save)
+
+        widget.setLayout(layout)
+        tabs.addTab(widget, "Seyahat Bilgileri")
+
+    def save_trip_info(self, city, country, start, end, budget, status):
+        self.db.update_trip(self.trip_id, city, country, start, end, budget, status)
+        QMessageBox.information(self, "Başarılı", "Seyahat bilgileri güncellendi!")
+        self.trip = self.db.get_trip_by_id(self.trip_id)
+
+    def create_hotels_tab(self, tabs):
+        widget = QWidget()
+        layout = QVBoxLayout()
+
+        self.hotel_table = QTableWidget()
+        self.hotel_table.setColumnCount(5)
+        self.hotel_table.setHorizontalHeaderLabels(["ID", "Otel Adı", "Fiyat (TL)", "Giriş", "Çıkış"])
+        self.hotel_table.hideColumn(0)
+        self.load_hotels()
+
+        form_widget = QWidget()
+        form_layout = QHBoxLayout()
+
+        hotel_name = QLineEdit()
+        hotel_name.setPlaceholderText("Otel Adı")
+        hotel_price = QDoubleSpinBox()
+        hotel_price.setRange(0, 100000)
+        hotel_price.setPrefix("₺")
+        check_in = QDateEdit()
+        check_in.setDate(QDate.currentDate())
+        check_in.setCalendarPopup(True)
+        check_out = QDateEdit()
+        check_out.setDate(QDate.currentDate().addDays(1))
+        check_out.setCalendarPopup(True)
+
+        btn_add = QPushButton("Otel Ekle")
+        btn_add.clicked.connect(lambda: self.add_hotel(
+            hotel_name.text(), hotel_price.value(),
+            check_in.date().toString("yyyy-MM-dd"),
+            check_out.date().toString("yyyy-MM-dd")
+        ))
+
+        form_layout.addWidget(QLabel("Ad:"))
+        form_layout.addWidget(hotel_name)
+        form_layout.addWidget(QLabel("Fiyat:"))
+        form_layout.addWidget(hotel_price)
+        form_layout.addWidget(QLabel("Giriş:"))
+        form_layout.addWidget(check_in)
+        form_layout.addWidget(QLabel("Çıkış:"))
+        form_layout.addWidget(check_out)
+        form_layout.addWidget(btn_add)
+
+        form_widget.setLayout(form_layout)
+
+        btn_delete = QPushButton("Seçili Oteli Sil")
+        btn_delete.clicked.connect(self.delete_hotel)
+
+        layout.addWidget(self.hotel_table)
+        layout.addWidget(form_widget)
+        layout.addWidget(btn_delete)
+
+        widget.setLayout(layout)
+        tabs.addTab(widget, "Oteller")
+
+    def load_hotels(self):
+        hotels = self.db.get_hotels_by_trip(self.trip_id)
+        self.hotel_table.setRowCount(0)
+        for hotel in hotels:
+            row = self.hotel_table.rowCount()
+            self.hotel_table.insertRow(row)
+            self.hotel_table.setItem(row, 0, QTableWidgetItem(str(hotel[0])))
+            self.hotel_table.setItem(row, 1, QTableWidgetItem(hotel[2]))
+            self.hotel_table.setItem(row, 2, QTableWidgetItem(f"₺{hotel[3]:.2f}"))
+            self.hotel_table.setItem(row, 3, QTableWidgetItem(hotel[4]))
+            self.hotel_table.setItem(row, 4, QTableWidgetItem(hotel[5]))
+
+    def add_hotel(self, name, price, check_in, check_out):
+        if not name:
+            QMessageBox.warning(self, "Uyarı", "Lütfen otel adını girin!")
+            return
+        self.db.add_hotel(self.trip_id, name, price, check_in, check_out)
+        self.load_hotels()
+        QMessageBox.information(self, "Başarılı", "Otel eklendi!")
+
+    def delete_hotel(self):
+        row = self.hotel_table.currentRow()
+        if row < 0:
+            QMessageBox.warning(self, "Uyarı", "Lütfen silmek için bir otel seçin!")
+            return
+        hid = int(self.hotel_table.item(row, 0).text())
+        reply = QMessageBox.question(self, "Onay", "Bu oteli silmek istediğinizden emin misiniz?",
+                                     QMessageBox.Yes | QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self.db.delete_hotel(hid)
+            self.load_hotels()
+
+    def create_plan_tab(self, tabs):
+        widget = QWidget()
+        layout = QVBoxLayout()
+
+        self.plan_table = QTableWidget()
+        self.plan_table.setColumnCount(5)
+        self.plan_table.setHorizontalHeaderLabels(["ID", "Gün", "Saat", "Aktivite", "Konum"])
+        self.plan_table.hideColumn(0)
+        self.load_plans()
+
+        form_widget = QWidget()
+        form_layout = QHBoxLayout()
+
+        plan_day = QLineEdit()
+        plan_day.setPlaceholderText("1. Gün")
+        plan_time = QLineEdit()
+        plan_time.setPlaceholderText("09:00")
+        plan_activity = QLineEdit()
+        plan_activity.setPlaceholderText("Aktivite")
+        plan_location = QLineEdit()
+        plan_location.setPlaceholderText("Konum")
+
+        btn_add = QPushButton("Plan Ekle")
+        btn_add.clicked.connect(lambda: self.add_plan(
+            plan_day.text(), plan_time.text(),
+            plan_activity.text(), plan_location.text()
+        ))
+
+        form_layout.addWidget(QLabel("Gün:"))
+        form_layout.addWidget(plan_day)
+        form_layout.addWidget(QLabel("Saat:"))
+        form_layout.addWidget(plan_time)
+        form_layout.addWidget(QLabel("Aktivite:"))
+        form_layout.addWidget(plan_activity)
+        form_layout.addWidget(QLabel("Konum:"))
+        form_layout.addWidget(plan_location)
+        form_layout.addWidget(btn_add)
+
+        form_widget.setLayout(form_layout)
+
+        btn_delete = QPushButton("Seçili Planı Sil")
+        btn_delete.clicked.connect(self.delete_plan)
+
+        layout.addWidget(self.plan_table)
+        layout.addWidget(form_widget)
+        layout.addWidget(btn_delete)
+
+        widget.setLayout(layout)
+        tabs.addTab(widget, "Günlük Plan")
+
+    def load_plans(self):
+        plans = self.db.get_plans_by_trip(self.trip_id)
+        self.plan_table.setRowCount(0)
+        for plan in plans:
+            row = self.plan_table.rowCount()
+            self.plan_table.insertRow(row)
+            self.plan_table.setItem(row, 0, QTableWidgetItem(str(plan[0])))
+            self.plan_table.setItem(row, 1, QTableWidgetItem(plan[2]))
+            self.plan_table.setItem(row, 2, QTableWidgetItem(plan[5] if plan[5] else ""))
+            self.plan_table.setItem(row, 3, QTableWidgetItem(plan[3]))
+            self.plan_table.setItem(row, 4, QTableWidgetItem(plan[4]))
+
+    def add_plan(self, day, time, activity, location):
+        if not activity:
+            QMessageBox.warning(self, "Uyarı", "Lütfen aktivite girin!")
+            return
+        self.db.add_plan(self.trip_id, day, activity, location, time)
+        self.load_plans()
+        QMessageBox.information(self, "Başarılı", "Plan eklendi!")
+
+    def delete_plan(self):
+        row = self.plan_table.currentRow()
+        if row < 0:
+            QMessageBox.warning(self, "Uyarı", "Lütfen silmek için bir plan seçin!")
+            return
+        pid = int(self.plan_table.item(row, 0).text())
+        reply = QMessageBox.question(self, "Onay", "Bu planı silmek istediğinizden emin misiniz?",
+                                     QMessageBox.Yes | QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self.db.delete_plan(pid)
+            self.load_plans()
+
+    def create_expenses_tab(self, tabs):
+        widget = QWidget()
+        layout = QVBoxLayout()
+
+        self.expense_table = QTableWidget()
+        self.expense_table.setColumnCount(5)
+        self.expense_table.setHorizontalHeaderLabels(["ID", "Kategori", "Tutar (TL)", "Tarih", "Açıklama"])
+        self.expense_table.hideColumn(0)
+        self.load_expenses()
+
+        form_widget = QWidget()
+        form_layout = QHBoxLayout()
+
+        expense_category = QComboBox()
+        expense_category.addItems(["Konaklama", "Yemek", "Ulaşım", "Aktivite", "Alışveriş", "Diğer"])
+
+        expense_amount = QDoubleSpinBox()
+        expense_amount.setRange(0, 100000)
+        expense_amount.setPrefix("₺")
+
+        expense_date = QDateEdit()
+        expense_date.setDate(QDate.currentDate())
+        expense_date.setCalendarPopup(True)
+
+        expense_desc = QLineEdit()
+        expense_desc.setPlaceholderText("Açıklama (isteğe bağlı)")
+
+        btn_add = QPushButton("Harcama Ekle")
+        btn_add.clicked.connect(lambda: self.add_expense(
+            expense_category.currentText(), expense_amount.value(),
+            expense_date.date().toString("yyyy-MM-dd"), expense_desc.text()
+        ))
+
+        form_layout.addWidget(QLabel("Kategori:"))
+        form_layout.addWidget(expense_category)
+        form_layout.addWidget(QLabel("Tutar:"))
+        form_layout.addWidget(expense_amount)
+        form_layout.addWidget(QLabel("Tarih:"))
+        form_layout.addWidget(expense_date)
+        form_layout.addWidget(QLabel("Açıklama:"))
+        form_layout.addWidget(expense_desc)
+        form_layout.addWidget(btn_add)
+
+        form_widget.setLayout(form_layout)
+
+        btn_delete = QPushButton("Seçili Harcamayı Sil")
+        btn_delete.clicked.connect(self.delete_expense)
+
+        layout.addWidget(self.expense_table)
+        layout.addWidget(form_widget)
+        layout.addWidget(btn_delete)
+
+        widget.setLayout(layout)
+        tabs.addTab(widget, "Harcamalar")
+
+    def load_expenses(self):
+        expenses = self.db.get_expenses_by_trip(self.trip_id)
+        self.expense_table.setRowCount(0)
+        for expense in expenses:
+            row = self.expense_table.rowCount()
+            self.expense_table.insertRow(row)
+            self.expense_table.setItem(row, 0, QTableWidgetItem(str(expense[0])))
+            self.expense_table.setItem(row, 1, QTableWidgetItem(expense[2]))
+            self.expense_table.setItem(row, 2, QTableWidgetItem(f"₺{expense[3]:.2f}"))
+            self.expense_table.setItem(row, 3, QTableWidgetItem(expense[4]))
+            self.expense_table.setItem(row, 4, QTableWidgetItem(expense[5] if expense[5] else ""))
+
+    def add_expense(self, category, amount, date, description):
+        self.db.add_expense(self.trip_id, category, amount, date, description)
+        self.load_expenses()
+        QMessageBox.information(self, "Başarılı", "Harcama eklendi!")
+
+    def delete_expense(self):
+        row = self.expense_table.currentRow()
+        if row < 0:
+            QMessageBox.warning(self, "Uyarı", "Lütfen silmek için bir harcama seçin!")
+            return
+        eid = int(self.expense_table.item(row, 0).text())
+        reply = QMessageBox.question(self, "Onay", "Bu harcamayı silmek istediğinizden emin misiniz?",
+                                     QMessageBox.Yes | QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self.db.delete_expense(eid)
+            self.load_expenses()
+
+    def create_summary_tab(self, tabs):
+        widget = QWidget()
+        layout = QVBoxLayout()
+
+        budget = self.trip[5]
+        hotel_total = self.db.get_hotel_total_by_trip(self.trip_id)
+        expense_total = self.db.get_trip_expense_total(self.trip_id)
+        total_spent = hotel_total + expense_total
+        remaining = budget - total_spent
+
+        status_text = ""
+        if self.trip[6] == "Planlandı":
+            status_text = "📋 Planlandı"
+        elif self.trip[6] == "Devam Ediyor":
+            status_text = "✈️ Devam Ediyor"
+        elif self.trip[6] == "Tamamlandı":
+            status_text = "✅ Tamamlandı"
+        else:
+            status_text = "❌ İptal Edildi"
+
+        summary_text = f"""
+        <h2>Seyahat Özeti: {self.trip[1]}, {self.trip[2]}</h2>
+        <hr>
+        <table width="100%" cellpadding="10">
+        <tr><td>📅 Tarihler:</td><td><b>{self.trip[3]} → {self.trip[4]}</b></td></tr>
+        <tr><td>💰 Toplam Bütçe:</td><td><b>₺{budget:,.2f}</b></td></tr>
+        <tr><td>🏨 Otel Harcamaları:</td><td>₺{hotel_total:,.2f}</td></tr>
+        <tr><td>🍽️ Diğer Harcamalar:</td><td>₺{expense_total:,.2f}</td></tr>
+        <tr><td>💸 Toplam Harcama:</td><td>₺{total_spent:,.2f}</td></tr>
+        <tr><td>✅ Kalan Bütçe:</td><td><b style="color: {'green' if remaining >= 0 else 'red'}">₺{remaining:,.2f}</b></td></tr>
+        <tr><td>📊 Durum:</td><td><b>{status_text}</b></td></tr>
         </table>
         """
-        lbl_bilgi = QLabel(bilgi_html)
-        layout.addWidget(lbl_bilgi)
 
-        barkod_html = f"""
-        <div style='text-align:center; font-family:monospace; font-size:24px; font-weight:bold; letter-spacing:5px; color:#34495e;'>
-            ||||| |||| || ||||||| |||| ||
-            <br><span style='font-size:12px; letter-spacing:2px; color:#7f8c8d;'>SB-TKT-{bilet_detay[0]}-2026</span>
-        </div>
-        """
-        lbl_barkod = QLabel(barkod_html)
-        lbl_barkod.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(lbl_barkod)
+        summary_label = QLabel(summary_text)
+        summary_label.setWordWrap(True)
+        summary_label.setStyleSheet("font-size: 14px; padding: 20px;")
 
+        layout.addWidget(summary_label)
         layout.addStretch()
-        
-        btn = QPushButton("Kapat")
-        btn.setStyleSheet("QPushButton { background-color: #34495e; color: white; padding:8px; border-radius:4px; } QPushButton:hover { background-color: #2c3e50; }")
-        btn.clicked.connect(self.close)
-        layout.addWidget(btn)
 
-class BiletlerimPenceresi(QDialog):
-    def __init__(self, kullanici_id, parent=None):
-        super().__init__(parent)
-        self.kullanici_id = kullanici_id
-        self.setWindowTitle("Geçmiş ve Aktif Biletlerim")
-        self.setMinimumSize(850, 480)
-        self.setStyleSheet("background-color: #f8f9fa;")
-        golge_ekle(self)
-        
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(25, 25, 25, 25)
-        layout.setSpacing(15)
-        
-        layout.addWidget(QLabel("<h2 style='color:#2c3e50; margin:0;'>🎟 Biletlerim</h2>"))
-        
-        self.table = QTableWidget(0, 7)
-        self.table.setHorizontalHeaderLabels(["KALKIŞ", "VARIŞ", "TARİH", "SAAT", "KOLTUK", "ÖDENEN", "DURUM"])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.setAlternatingRowColors(True)
-        layout.addWidget(self.table)
-        
-        btn_lay = QHBoxLayout()
-        btn_lay.setSpacing(15)
-        
-        btn_goruntule = QPushButton("🎫 BİNİŞ KARTINI GÖRÜNTÜLE")
-        btn_goruntule.setStyleSheet(BTN_BLUE)
-        btn_goruntule.clicked.connect(self.bileti_goruntule)
-        btn_lay.addWidget(btn_goruntule)
-        
-        btn_iptal = QPushButton("BİLETİ İPTAL ET VE İADE AL")
-        btn_iptal.setStyleSheet(BTN_RED)
-        btn_iptal.clicked.connect(self.iptal_et)
-        btn_lay.addWidget(btn_iptal)
-        
-        layout.addLayout(btn_lay)
-        self.yukle()
+        widget.setLayout(layout)
+        tabs.addTab(widget, "Özet")
 
-    def yukle(self):
-        self.data = kullanici_biletlerini_getir(self.kullanici_id)
-        self.table.setRowCount(len(self.data))
-        for i, b in enumerate(self.data):
-            for j in range(1, 5): 
-                self.table.setItem(i, j-1, QTableWidgetItem(str(b[j])))
-            self.table.setItem(i, 4, QTableWidgetItem(f"Koltuk {b[5]}"))
-            self.table.setItem(i, 5, QTableWidgetItem(f"{b[6]:.2f} TL"))
-            
-            item_durum = QTableWidgetItem(str(b[7]))
-            item_durum.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            font = item_durum.font()
-            font.setBold(True)
-            item_durum.setFont(font)
-            
-            if b[7] == 'Tamamlandı': item_durum.setForeground(QColor("#27ae60"))
-            elif b[7] == 'İptal Edildi': item_durum.setForeground(QColor("#c0392b"))
-            else: item_durum.setForeground(QColor("#f39c12"))
-            self.table.setItem(i, 6, item_durum)
 
-    def bileti_goruntule(self):
-        row = self.table.currentRow()
-        if row < 0:
-            return QMessageBox.warning(self, "Uyarı", "Lütfen görüntülemek istediğiniz bileti tablodan seçin!")
-        
-        bilet_data = self.data[row]
-        yolcu = kullanici_getir_by_id(self.kullanici_id)
-        BiletCiktisiPenceresi(bilet_data, yolcu[3], self).exec()
-
-    def iptal_et(self):
-        row = self.table.currentRow()
-        if row < 0: return
-        
-        if self.data[row][7] == 'Tamamlandı':
-            return QMessageBox.warning(self, "Uyarı", "Uçuşu gerçekleşmiş (Tamamlanmış) bir bileti iptal edemezsiniz!")
-        if self.data[row][7] == 'İptal Edildi':
-            return QMessageBox.warning(self, "Uyarı", "Bu biletin ait olduğu sefer zaten iptal edilmiş!")
-            
-        cevap = QMessageBox.question(self, "İptal Onayı", "Seçili bileti iptal edip ücret iadesi almak istiyor musunuz?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        if cevap == QMessageBox.StandardButton.Yes:
-            basarili, msg = bilet_iptal_et(self.data[row][0])
-            QMessageBox.information(self, "İşlem Sonucu", msg)
-            self.yukle()
-
-class BakiyeYuklePenceresi(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Cüzdan - Para Yükle")
-        self.setFixedSize(340, 240)
-        self.setStyleSheet("background-color: white; border-radius: 10px;")
-        golge_ekle(self)
-        
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(30, 30, 30, 30)
-        
-        layout.addWidget(QLabel("<h3 style='color:#2c3e50; text-align:center; margin:0;'>💳 Yüklenecek Tutar</h3>"))
-        layout.addSpacing(10)
-        
-        self.spin = QDoubleSpinBox()
-        self.spin.setRange(100, 100000)
-        self.spin.setValue(5000)
-        self.spin.setSuffix(" TL")
-        self.spin.setStyleSheet("font-size: 18px; font-weight: bold; color: #27ae60;")
-        layout.addWidget(self.spin)
-        
-        layout.addStretch()
-        btn = QPushButton("ÖDEMEYİ ONAYLA")
-        btn.setStyleSheet(BTN_GREEN)
-        btn.clicked.connect(self.accept)
-        layout.addWidget(btn)
-
-class SeferEklePenceresi(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Yeni Uçuş Planı Oluştur")
-        self.setFixedSize(480, 450)
-        self.setStyleSheet("background-color: white; border-radius: 10px;")
-        golge_ekle(self)
-        
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(15)
-        
-        layout.addWidget(QLabel("<h2 style='color:#2980b9; margin:0;'>✈️ Uçuş Bilgileri</h2>"))
-        
-        guncel_sehirler = sehir_isimlerini_getir()
-        
-        self.ck = QComboBox(); self.ck.addItems(guncel_sehirler)
-        self.cv = QComboBox(); self.cv.addItems(guncel_sehirler)
-        
-        self.dt = QDateEdit(); self.dt.setCalendarPopup(True); self.dt.setDate(QDate.currentDate())
-        
-        takvim = self.dt.calendarWidget()
-        takvim.setMinimumSize(350, 250)
-        takvim.setStyleSheet("""
-            QCalendarWidget QWidget { background-color: white; }
-            QCalendarWidget QToolButton { height: 30px; font-size: 14px; font-weight: bold; }
-            QCalendarWidget QAbstractItemView:enabled { font-size: 14px; selection-background-color: #2ecc71; selection-color: white; }
-        """)
-
-        self.tm = QTimeEdit(); self.tm.setTime(QTime.currentTime())
-        self.pr = QDoubleSpinBox(); self.pr.setRange(0, 500000); self.pr.setSuffix(" TL")
-        
-        form_layout = QGridLayout()
-        form_layout.setSpacing(15)
-        form_layout.addWidget(QLabel("<b>Kalkış Noktası:</b>"), 0, 0); form_layout.addWidget(self.ck, 0, 1)
-        form_layout.addWidget(QLabel("<b>Varış Noktası:</b>"), 1, 0); form_layout.addWidget(self.cv, 1, 1)
-        form_layout.addWidget(QLabel("<b>Tarih:</b>"), 2, 0); form_layout.addWidget(self.dt, 2, 1)
-        form_layout.addWidget(QLabel("<b>Saat:</b>"), 3, 0); form_layout.addWidget(self.tm, 3, 1)
-        form_layout.addWidget(QLabel("<b>Taban Fiyat:</b>"), 4, 0); form_layout.addWidget(self.pr, 4, 1)
-        layout.addLayout(form_layout)
-        
-        layout.addStretch()
-        btn = QPushButton("SEFERİ SİSTEME KAYDET")
-        btn.setStyleSheet(BTN_ORANGE)
-        btn.clicked.connect(self.save)
-        layout.addWidget(btn)
-
-    def save(self):
-        if self.ck.currentText() == self.cv.currentText(): 
-            return QMessageBox.warning(self, "Hata", "Kalkış ve Varış aynı şehir olamaz!")
-        if sefer_ekle(self.ck.currentText(), self.cv.currentText(), self.dt.date().toString("dd.MM.yyyy"), self.tm.time().toString("HH:mm"), self.pr.value()): 
-            self.accept()
-
-class AdminYeniSehirPenceresi(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Sisteme Yeni Şehir Ekle")
-        self.setFixedSize(480, 480) # Yükseklik biraz artırıldı
-        self.setStyleSheet("background-color: white; border-radius: 10px;")
-        golge_ekle(self)
-        
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(15)
-
-        layout.addWidget(QLabel("<h2 style='color:#8e44ad; margin:0;'>🌍 Yeni Destinasyon</h2>"))
-
-        self.isim = QLineEdit(); self.isim.setPlaceholderText("Şehir Adı (Örn: Berlin)")
-        
-        # YENİ EKLENEN İKLİM KUTUSU
-        self.iklim_cb = QComboBox()
-        self.iklim_cb.addItems(["Soğuk", "Ilıman", "Sıcak"])
-        
-        self.yerler = QLineEdit(); self.yerler.setPlaceholderText("Gezilecek Yerler (Virgülle ayırın)")
-        self.aktiviteler = QLineEdit(); self.aktiviteler.setPlaceholderText("Yapılabilecek Aktiviteler (Örn: Boğaz turu)")
-
-        layout.addWidget(QLabel("<b>Şehir Adı:</b>")); layout.addWidget(self.isim)
-        layout.addWidget(QLabel("<b>İklim Tipi:</b>")); layout.addWidget(self.iklim_cb)
-        layout.addWidget(QLabel("<b>Gezilecek Yerler:</b>")); layout.addWidget(self.yerler)
-        layout.addWidget(QLabel("<b>Yapılabilecek Aktiviteler:</b>")); layout.addWidget(self.aktiviteler)
-        
-        layout.addStretch()
-        btn = QPushButton("ŞEHRİ VERİTABANINA EKLE")
-        btn.setStyleSheet(BTN_PURPLE)
-        btn.clicked.connect(self.kaydet)
-        layout.addWidget(btn)
-
-    def kaydet(self):
-        if not self.isim.text() or not self.yerler.text() or not self.aktiviteler.text():
-            return QMessageBox.warning(self, "Hata", "Tüm alanları doldurmalısınız!")
-            
-        iklim_secimi = self.iklim_cb.currentText()
-            
-        if sehir_ekle_db(self.isim.text(), self.yerler.text(), self.aktiviteler.text(), iklim_secimi):
-            QMessageBox.information(self, "Başarılı", f"{self.isim.text().title()} sisteme başarıyla eklendi!\nArtık seferlerde ve uçuş aramalarında görünecek.")
-            self.accept()
-        else:
-            QMessageBox.warning(self, "Hata", "Bu şehir zaten sistemde kayıtlı veya bir hata oluştu!")
-
-class AdminSeferDetayPenceresi(QDialog):
-    def __init__(self, sefer_data, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Yolcu Manifestosu")
-        self.setMinimumSize(680, 480)
-        self.setStyleSheet("background-color: #f8f9fa;")
-        golge_ekle(self)
-        
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(25, 25, 25, 25)
-        layout.setSpacing(15)
-        
-        layout.addWidget(QLabel(f"<h3 style='color:#2c3e50; margin:0;'>✈️ {sefer_data[1]} -> {sefer_data[2]} Uçuşu Yolcu Listesi</h3>"))
-        
-        self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["KOLTUK NO", "YOLCU ADI", "TELEFON", "ÖDENEN"])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.setAlternatingRowColors(True)
-        layout.addWidget(self.table)
-        
-        yolcular = sefer_yolculari_getir(sefer_data[0])
-        self.table.setRowCount(len(yolcular))
-        
-        toplam_gelir = 0
-        for i, y in enumerate(yolcular):
-            self.table.setItem(i, 0, QTableWidgetItem(f"Koltuk {y[0]}"))
-            self.table.setItem(i, 1, QTableWidgetItem(y[1]))
-            self.table.setItem(i, 2, QTableWidgetItem(y[2]))
-            self.table.setItem(i, 3, QTableWidgetItem(f"{y[3]:.2f} TL"))
-            toplam_gelir += y[3]
-            
-        layout.addWidget(QLabel(f"<span style='font-size:16px; color:#27ae60;'><b>👥 Toplam Doluluk:</b> {len(yolcular)}/40 &nbsp;&nbsp;|&nbsp;&nbsp; <b>💰 Kazanılan Toplam Gelir:</b> {toplam_gelir:.2f} TL</span>"))
-        
-        btn = QPushButton("Pencereyi Kapat")
-        btn.setStyleSheet(BTN_DARK)
-        btn.clicked.connect(self.close)
-        layout.addWidget(btn)
-
-# --- 3. ANA EKRAN BİLEŞENLERİ ---
-class LoginScreen(QWidget):
-    def __init__(self, parent):
-        super().__init__()
-        self.parent = parent
-        l = QVBoxLayout(self)
-        l.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        f = QFrame()
-        f.setFixedWidth(500)
-        f.setStyleSheet("QFrame { background-color: white; border-radius: 16px; }")
-        golge_ekle(f)
-        
-        fl = QVBoxLayout(f)
-        fl.setContentsMargins(40, 50, 40, 50)
-        fl.setSpacing(20)
-        
-        lbl_baslik = QLabel("<h1 style='color:#2980b9; margin:0; font-size:36px;'>✈️ SkyBound</h1><p style='color:#7f8c8d; margin:0; font-size:16px;'>Premium Biletleme Sistemi</p>")
-        lbl_baslik.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        fl.addWidget(lbl_baslik)
-        
-        fl.addSpacing(15)
-        
-        self.u = QLineEdit()
-        self.u.setPlaceholderText("Kullanıcı Adı")
-        self.u.setValidator(QRegularExpressionValidator(QRegularExpression(r"^[^0-9]*$")))
-        self.u.setMinimumHeight(55)
-        self.u.setStyleSheet("font-size: 16px;")
-        fl.addWidget(self.u)
-        
-        self.p = PasswordField("Şifre")
-        fl.addWidget(self.p)
-        
-        fl.addSpacing(15)
-        
-        btn_giris = QPushButton("GİRİŞ YAP")
-        btn_giris.setStyleSheet(BTN_BLUE)
-        btn_giris.setMinimumHeight(55)
-        font = btn_giris.font()
-        font.setPointSize(12)
-        btn_giris.setFont(font)
-        btn_giris.clicked.connect(self.login)
-        fl.addWidget(btn_giris)
-        
-        btn_yeni = QPushButton("Hesap Oluştur")
-        btn_yeni.setStyleSheet("QPushButton { color: #3498db; background: transparent; font-weight: bold; font-size: 16px; } QPushButton:hover { color: #2980b9; text-decoration: underline; }")
-        btn_yeni.clicked.connect(self.hesap_olustura_git)
-        fl.addWidget(btn_yeni)
-        
-        l.addWidget(f)
-
-    def hesap_olustura_git(self):
-        self.parent.setCurrentIndex(1)
-
-    def login(self):
-        user = kullanici_kontrol(self.u.text(), self.p.input.text())
-        if user: 
-            self.parent.login_basarili(user)
-        else: 
-            QMessageBox.warning(self, "Hata", "Kullanıcı adı veya şifre hatalı!")
-
-class RegisterScreen(QWidget):
-    def __init__(self, parent):
-        super().__init__()
-        self.parent = parent
-        l = QVBoxLayout(self)
-        l.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        f = QFrame()
-        f.setFixedWidth(550)
-        f.setStyleSheet("QFrame { background-color: white; border-radius: 16px; }")
-        golge_ekle(f)
-        
-        fl = QVBoxLayout(f)
-        fl.setContentsMargins(40, 40, 40, 40)
-        fl.setSpacing(15)
-        
-        lbl = QLabel("<h2 style='color:#2c3e50; margin:0; font-size:28px;'>Sisteme Kayıt Ol</h2>")
-        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        fl.addWidget(lbl)
-        
-        fl.addSpacing(10)
-        
-        harf_val = QRegularExpressionValidator(QRegularExpression(r"^[^0-9]*$"))
-        
-        self.n = QLineEdit()
-        self.n.setPlaceholderText("Ad Soyad")
-        self.n.setValidator(harf_val)
-        self.n.setMinimumHeight(55)
-        self.n.setStyleSheet("font-size: 16px;")
-        
-        self.u = QLineEdit()
-        self.u.setPlaceholderText("Kullanıcı Adı")
-        self.u.setValidator(harf_val)
-        self.u.setMinimumHeight(55)
-        self.u.setStyleSheet("font-size: 16px;")
-        
-        self.tel = QLineEdit()
-        self.tel.setPlaceholderText("Telefon (11 Hane Örn: 0555...)")
-        self.tel.setMaxLength(11)
-        self.tel.setValidator(QRegularExpressionValidator(QRegularExpression(r"^[0-9]*$")))
-        self.tel.setMinimumHeight(55)
-        self.tel.setStyleSheet("font-size: 16px;")
-        
-        fl.addWidget(self.n)
-        fl.addWidget(self.u)
-        fl.addWidget(self.tel)
-        
-        dt_layout = QHBoxLayout()
-        lbl_dt = QLabel("<b>Doğum Tarihi:</b>")
-        lbl_dt.setStyleSheet("font-size: 16px;")
-        dt_layout.addWidget(lbl_dt)
-        
-        self.dt = QDateEdit()
-        self.dt.setCalendarPopup(True)
-        self.dt.setDate(QDate(2000,1,1))
-        self.dt.setMinimumHeight(55)
-        self.dt.setStyleSheet("font-size: 16px;")
-        
-        takvim = self.dt.calendarWidget()
-        takvim.setMinimumSize(350, 250) 
-        takvim.setStyleSheet("""
-            QCalendarWidget QWidget { background-color: white; }
-            QCalendarWidget QToolButton { height: 30px; font-size: 14px; font-weight: bold; }
-            QCalendarWidget QAbstractItemView:enabled { font-size: 14px; selection-background-color: #2ecc71; selection-color: white; }
-        """)
-
-        dt_layout.addWidget(self.dt)
-        fl.addLayout(dt_layout)
-        
-        self.p = PasswordField("Şifre")
-        fl.addWidget(self.p)
-        
-        fl.addSpacing(15)
-        
-        btn_kayit = QPushButton("KAYDI TAMAMLA")
-        btn_kayit.setStyleSheet(BTN_GREEN)
-        btn_kayit.setMinimumHeight(55)
-        font = btn_kayit.font()
-        font.setPointSize(12)
-        btn_kayit.setFont(font)
-        btn_kayit.clicked.connect(self.reg)
-        fl.addWidget(btn_kayit)
-        
-        btn_geri = QPushButton("Geri Dön")
-        btn_geri.setStyleSheet("QPushButton { color: #7f8c8d; background: transparent; font-weight: bold; font-size: 16px; } QPushButton:hover { color: #34495e; text-decoration: underline; }")
-        btn_geri.clicked.connect(self.geriye_git)
-        fl.addWidget(btn_geri)
-        
-        l.addWidget(f)
-
-    def geriye_git(self):
-        self.parent.setCurrentIndex(0)
-
-    def reg(self):
-        if not self.u.text() or not self.p.input.text() or len(self.tel.text()) != 11: 
-            return QMessageBox.warning(self, "Uyarı", "Lütfen tüm bilgileri eksiksiz ve doğru (Telefon 11 hane) giriniz!")
-        if kullanici_kaydet(self.u.text(), self.p.input.text(), self.n.text(), self.tel.text(), self.dt.date().toString("dd.MM.yyyy")): 
-            QMessageBox.information(self, "Başarılı", "Kayıt işlemi tamamlandı! Şimdi giriş yapabilirsiniz.")
-            self.parent.setCurrentIndex(0)
-        else:
-            QMessageBox.warning(self, "Hata", "Bu kullanıcı adı sistemde zaten mevcut!")
-
-class AdminPanel(QWidget):
-    def __init__(self, parent):
-        super().__init__()
-        self.parent = parent
-        self.seferler_cache = []
-        l = QVBoxLayout(self)
-        l.setContentsMargins(30, 30, 30, 30)
-        l.setSpacing(20)
-        
-        top_bar = QFrame()
-        top_bar.setStyleSheet("background-color: white; border-radius: 12px;")
-        golge_ekle(top_bar)
-        
-        h = QHBoxLayout(top_bar)
-        h.setContentsMargins(20, 15, 20, 15)
-        h.setSpacing(15)
-        
-        h.addWidget(QLabel("<h2 style='color:#2c3e50; margin:0;'>👨‍✈️ Yönetici Kontrol Paneli</h2>"))
-        h.addStretch()
-        
-        btn_sehir_ekle = QPushButton("🌍 YENİ ŞEHİR EKLE")
-        btn_sehir_ekle.setStyleSheet(BTN_PURPLE)
-        btn_sehir_ekle.clicked.connect(self.sehir_ekle_ac)
-        h.addWidget(btn_sehir_ekle)
-        
-        btn_ekle = QPushButton("✈️ YENİ SEFER OLUŞTUR")
-        btn_ekle.setStyleSheet(BTN_ORANGE)
-        btn_ekle.clicked.connect(self.ekle_ac)
-        h.addWidget(btn_ekle)
-        
-        btn_cikis = QPushButton("Çıkış Yap")
-        btn_cikis.setStyleSheet(BTN_DARK)
-        btn_cikis.clicked.connect(self.cikisa_git)
-        h.addWidget(btn_cikis)
-        
-        l.addWidget(top_bar)
-        
-        self.table = QTableWidget(0, 6)
-        self.table.setHorizontalHeaderLabels(["KALKIŞ ŞEHRİ", "VARIŞ ŞEHRİ", "TARİH", "SAAT", "TABAN FİYAT", "DURUM"])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.setAlternatingRowColors(True)
-        golge_ekle(self.table)
-        l.addWidget(self.table)
-        
-        btn_lay = QHBoxLayout()
-        btn_lay.setSpacing(15)
-        
-        btn_yolcu = QPushButton("📋 SEÇİLİ SEFERİN YOLCU LİSTESİNİ GÖR")
-        btn_yolcu.setStyleSheet(BTN_BLUE)
-        btn_yolcu.clicked.connect(self.yolcu_gor)
-        btn_lay.addWidget(btn_yolcu)
-        
-        btn_sil = QPushButton("🗑️ SEÇİLİ SEFERİ İPTAL ET / SİL")
-        btn_sil.setStyleSheet(BTN_RED)
-        btn_sil.clicked.connect(self.sil_islem)
-        btn_lay.addWidget(btn_sil)
-        
-        l.addLayout(btn_lay)
-
-    def cikisa_git(self):
-        self.parent.setCurrentIndex(0)
-
-    def yenile(self):
-        self.seferler_cache = seferleri_getir()
-        self.table.setRowCount(len(self.seferler_cache))
-        for i, r in enumerate(self.seferler_cache):
-            for j in range(1, 7): 
-                val = f"{r[j]:.2f} TL" if j == 5 else str(r[j])
-                item = QTableWidgetItem(val)
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                
-                if j == 6:
-                    font = item.font()
-                    font.setBold(True)
-                    item.setFont(font)
-                    if r[j] == 'İptal Edildi': item.setForeground(QColor("#c0392b"))
-                    elif r[j] == 'Tamamlandı': item.setForeground(QColor("#27ae60"))
-                    else: item.setForeground(QColor("#f39c12"))
-                    
-                self.table.setItem(i, j-1, item)
-
-    def ekle_ac(self):
-        if SeferEklePenceresi(self).exec(): 
-            self.yenile()
-
-    def sehir_ekle_ac(self):
-        if AdminYeniSehirPenceresi(self).exec():
-            self.parent.pass_scr.sehir_filtrelerini_guncelle()
-
-    def yolcu_gor(self):
-        row = self.table.currentRow()
-        if row >= 0: 
-            AdminSeferDetayPenceresi(self.seferler_cache[row], self).exec()
-        else:
-            QMessageBox.warning(self, "Uyarı", "Lütfen listeden bir sefer seçin!")
-
-    def sil_islem(self):
-        row = self.table.currentRow()
-        if row >= 0:
-            sefer = self.seferler_cache[row]
-            if sefer[6] == 'İptal Edildi':
-                return QMessageBox.warning(self, "Uyarı", "Bu sefer zaten iptal edilmiş!")
-            if sefer[6] == 'Tamamlandı':
-                return QMessageBox.warning(self, "Uyarı", "Tamamlanmış (uçuşu gerçekleşmiş) bir seferi iptal edemezsiniz!")
-                
-            cevap = QMessageBox.question(self, "İptal Onayı", "Bu seferi iptal edip, bilet alan tüm yolcuların parasını iade etmek istediğinize emin misiniz?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            if cevap == QMessageBox.StandardButton.Yes:
-                sefer_sil(sefer[0])
-                self.yenile()
-        else:
-            QMessageBox.warning(self, "Uyarı", "Lütfen iptal edilecek seferi seçin!")
-
-class PassengerPanel(QWidget):
-    def __init__(self, parent):
-        super().__init__()
-        self.parent = parent
-        self.tum_seferler = []
-        self.gosterilen = []
-        
-        l = QVBoxLayout(self)
-        l.setContentsMargins(30, 30, 30, 30)
-        l.setSpacing(20)
-        
-        top_h_layout = QHBoxLayout()
-        top_h_layout.setSpacing(20)
-        
-        self.profil_karti = QFrame()
-        self.profil_karti.setStyleSheet("background-color: white; border-radius: 12px;")
-        golge_ekle(self.profil_karti)
-        p_lay = QVBoxLayout(self.profil_karti)
-        p_lay.setContentsMargins(20, 15, 20, 15)
-        p_lay.setSpacing(8)
-        
-        p_baslik = QLabel("<b style='color:#2980b9; font-size: 16px;'>👤 Yolcu Profili</b>")
-        self.lbl_ad = QLabel()
-        self.lbl_kadi = QLabel()
-        self.lbl_dtarih = QLabel()
-        
-        p_lay.addWidget(p_baslik)
-        p_lay.addWidget(self.lbl_ad)
-        p_lay.addWidget(self.lbl_kadi)
-        p_lay.addWidget(self.lbl_dtarih)
-        p_lay.addStretch()
-        
-        top_h_layout.addWidget(self.profil_karti, stretch=2)
-        
-        self.bakiye_karti = QFrame()
-        self.bakiye_karti.setStyleSheet("background-color: white; border-radius: 12px;")
-        golge_ekle(self.bakiye_karti)
-        bak_lay = QVBoxLayout(self.bakiye_karti)
-        bak_lay.setContentsMargins(20, 15, 20, 15)
-        bak_lay.setSpacing(10)
-        bak_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        self.lbl_bakiye = QLabel()
-        self.lbl_bakiye.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        btn_para = QPushButton("💰 BAKİYE YÜKLE")
-        btn_para.setStyleSheet(BTN_GREEN)
-        btn_para.clicked.connect(self.para_yukle_aksiyon)
-        
-        bak_lay.addWidget(self.lbl_bakiye)
-        bak_lay.addWidget(btn_para)
-        
-        top_h_layout.addWidget(self.bakiye_karti, stretch=2)
-        
-        islem_karti = QFrame()
-        islem_karti.setStyleSheet("background-color: white; border-radius: 12px;")
-        golge_ekle(islem_karti)
-        islem_lay = QVBoxLayout(islem_karti)
-        islem_lay.setContentsMargins(20, 15, 20, 15)
-        islem_lay.setSpacing(10)
-        islem_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        btn_biletlerim = QPushButton("🎟 BİLETLERİM")
-        btn_biletlerim.setStyleSheet(BTN_ORANGE)
-        btn_biletlerim.clicked.connect(self.biletlerim_ac)
-        
-        btn_cikis = QPushButton("Çıkış Yap")
-        btn_cikis.setStyleSheet(BTN_DARK)
-        btn_cikis.clicked.connect(self.cikisa_git)
-        
-        islem_lay.addStretch()
-        islem_lay.addWidget(btn_biletlerim)
-        islem_lay.addWidget(btn_cikis)
-        islem_lay.addStretch()
-        
-        top_h_layout.addWidget(islem_karti, stretch=2)
-        
-        l.addLayout(top_h_layout)
-        
-        search_card = QFrame()
-        search_card.setStyleSheet("background-color: white; border-radius: 12px;")
-        golge_ekle(search_card)
-        fl = QHBoxLayout(search_card)
-        fl.setContentsMargins(20, 20, 20, 20)
-        fl.setSpacing(15)
-        
-        fl.addWidget(QLabel("<b>🛫 Nereden:</b>"))
-        self.cb_k = QComboBox()
-        fl.addWidget(self.cb_k)
-        
-        fl.addWidget(QLabel("<b>🛬 Nereye:</b>"))
-        self.cb_v = QComboBox()
-        fl.addWidget(self.cb_v)
-        
-        self.sehir_filtrelerini_guncelle()
-        
-        btn_ara = QPushButton("🔍 UÇUŞLARI LİSTELE")
-        btn_ara.setStyleSheet(BTN_BLUE)
-        btn_ara.clicked.connect(self.filtrele)
-        fl.addWidget(btn_ara)
-        l.addWidget(search_card)
-        
-        self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["KALKIŞ", "VARIŞ", "TARİH", "SAAT", "FİYAT"])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.setAlternatingRowColors(True)
-        golge_ekle(self.table)
-        l.addWidget(self.table)
-        
-        b_lay = QHBoxLayout()
-        b_lay.setSpacing(15)
-        
-        btn_detay = QPushButton("🌍 VARIŞ ŞEHRİ REHBERİNİ İNCELE")
-        btn_detay.setStyleSheet(BTN_PURPLE)
-        btn_detay.clicked.connect(self.rehber_ac)
-        b_lay.addWidget(btn_detay)
-        
-        btn_al = QPushButton("🎫 SEÇİLİ UÇUŞ İÇİN BİLET AL")
-        btn_al.setStyleSheet(BTN_GREEN)
-        btn_al.clicked.connect(self.bilet_sureci)
-        b_lay.addWidget(btn_al)
-        l.addLayout(b_lay)
-
-    def sehir_filtrelerini_guncelle(self):
-        guncel_sehirler = sehir_isimlerini_getir()
-        mevcut_kalkis = self.cb_k.currentText()
-        mevcut_varis = self.cb_v.currentText()
-        
-        self.cb_k.clear(); self.cb_k.addItem("Tümü"); self.cb_k.addItems(guncel_sehirler)
-        self.cb_v.clear(); self.cb_v.addItem("Tümü"); self.cb_v.addItems(guncel_sehirler)
-        
-        if self.cb_k.findText(mevcut_kalkis) >= 0: self.cb_k.setCurrentText(mevcut_kalkis)
-        if self.cb_v.findText(mevcut_varis) >= 0: self.cb_v.setCurrentText(mevcut_varis)
-
-    def cikisa_git(self):
-        self.parent.setCurrentIndex(0)
-
-    def update_user(self, user):
-        self.lbl_ad.setText(f"<span style='color:#34495e; font-size:14px;'><b>Ad Soyad:</b> {user[3]}</span>")
-        self.lbl_kadi.setText(f"<span style='color:#34495e; font-size:14px;'><b>Kullanıcı Adı:</b> @{user[1]}</span>")
-        self.lbl_dtarih.setText(f"<span style='color:#34495e; font-size:14px;'><b>Doğum Tarihi:</b> {user[5]}</span>")
-        
-        self.lbl_bakiye.setText(f"<div style='font-size:14px; color:#7f8c8d; text-align:center;'>Güncel Bakiye</div><div style='font-size: 24px; font-weight: bold; color: #27ae60; text-align:center;'>{user[6]:.2f} TL</div>")
-        
-        self.tum_seferler = [s for s in seferleri_getir() if s[6] == 'Planlandı']
-        self.gosterilen = self.tum_seferler
-        self.tablo_doldur()
-
-    def filtrele(self):
-        self.gosterilen = [s for s in self.tum_seferler if (self.cb_k.currentText() == "Tümü" or s[1] == self.cb_k.currentText()) and (self.cb_v.currentText() == "Tümü" or s[2] == self.cb_v.currentText())]
-        self.tablo_doldur()
-
-    def tablo_doldur(self):
-        self.table.setRowCount(len(self.gosterilen))
-        for i, r in enumerate(self.gosterilen):
-            for j in range(1, 6): 
-                item = QTableWidgetItem(str(r[j]))
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.table.setItem(i, j-1, item)
-
-    def para_yukle_aksiyon(self):
-        pencere = BakiyeYuklePenceresi(self)
-        if pencere.exec():
-            tutar = pencere.spin.value()
-            bakiye_artir(self.parent.aktif_kullanici[0], tutar)
-            self.parent.aktif_kullanici = kullanici_getir_by_id(self.parent.aktif_kullanici[0])
-            self.update_user(self.parent.aktif_kullanici)
-            QMessageBox.information(self, "Başarılı İşlem", f"{tutar:.2f} TL cüzdanınıza başarıyla yüklendi!")
-
-    def rehber_ac(self):
-        row = self.table.currentRow()
-        if row >= 0: 
-            sehir = self.gosterilen[row][2]
-            tarih = self.gosterilen[row][3]
-            SehirDetayPenceresi(sehir, tarih, self).exec()
-        else:
-            QMessageBox.warning(self, "Uyarı", "Lütfen rehberini görmek istediğiniz uçuşu seçin!")
-
-    def biletlerim_ac(self): 
-        BiletlerimPenceresi(self.parent.aktif_kullanici[0], self).exec()
-        self.parent.aktif_kullanici = kullanici_getir_by_id(self.parent.aktif_kullanici[0])
-        self.update_user(self.parent.aktif_kullanici)
-
-    def bilet_sureci(self):
-        row = self.table.currentRow()
-        if row < 0: 
-            return QMessageBox.warning(self, "Uyarı", "Lütfen bilet almak için listeden bir uçuş seçin!")
-            
-        sefer = self.gosterilen[row]
-        k_id = self.parent.aktif_kullanici[0]
-        
-        eski_koltuk = donus_bileti_kontrol_et(k_id, sefer[1], sefer[2], sefer[3])
-        if eski_koltuk:
-            indirimli = sefer[5] * 0.60
-            
-            user_bday = QDate.fromString(self.parent.aktif_kullanici[5], "dd.MM.yyyy")
-            today = QDate.currentDate()
-            is_birthday = False
-            if user_bday.isValid():
-                is_birthday = (user_bday.day() == today.day() and user_bday.month() == today.month())
-            
-            if is_birthday:
-                indirimli *= 0.75
-                msg = f"Bu rota için gidiş biletiniz var!\n\n🎂 Hem %40 Dönüş, Hem %25 Doğum Günü İndirimi Uygulandı!\nKoltuk Sabitlendi: Koltuk {eski_koltuk}\nÖdenecek: {indirimli:.2f} TL\n\nOnaylıyor musunuz?"
-            else:
-                msg = f"Bu rota için gidiş biletiniz var!\n\n%40 Dönüş İndirimi Uygulandı!\nKoltuk Sabitlendi: Koltuk {eski_koltuk}\nÖdenecek: {indirimli:.2f} TL\n\nOnaylıyor musunuz?"
-                
-            if QMessageBox.question(self, "Dönüş İndirimi!", msg, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
-                self.parent.bilet_satin_al_islem(k_id, sefer[0], eski_koltuk, indirimli)
-            return
-            
-        cevap = QMessageBox.question(self, "Koltuk Seçimi", "Özel koltuk seçmek 150 TL ek ücrete tabidir.\n\nKendi koltuğunuzu seçmek istiyor musunuz?\n(Hayır derseniz sistem ücretsiz ve rastgele bir koltuk atayacaktır.)", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        if cevap == QMessageBox.StandardButton.Yes:
-            self.parent.koltuk_secim_ekranini_ac(sefer)
-        else:
-            self.parent.rastgele_koltuk_ata(sefer)
-
-class SeatSelectionPanel(QWidget):
-    def __init__(self, parent):
-        super().__init__()
-        self.parent = parent
-        self.l = QVBoxLayout(self)
-        self.l.setContentsMargins(40, 40, 40, 40)
-        
-        self.header_card = QFrame()
-        self.header_card.setStyleSheet("background-color: white; border-radius: 12px;")
-        golge_ekle(self.header_card)
-        h_layout = QVBoxLayout(self.header_card)
-        h_layout.setContentsMargins(20, 20, 20, 20)
-        
-        self.header = QLabel("Koltuk Seç")
-        self.header.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        h_layout.addWidget(self.header)
-        self.l.addWidget(self.header_card)
-        
-        self.l.addSpacing(20)
-        
-        self.grid = QGridLayout()
-        self.grid.setSpacing(10)
-        self.grid.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.l.addLayout(self.grid)
-        
-        self.l.addStretch()
-        
-        btn_geri = QPushButton("Vazgeç ve Geri Dön")
-        btn_geri.setStyleSheet(BTN_DARK)
-        btn_geri.clicked.connect(self.geriye_git)
-        self.l.addWidget(btn_geri)
-
-    def geriye_git(self):
-        self.parent.setCurrentIndex(3)
-
-    def ekran_hazirla(self, sefer_data):
-        self.sefer_id = sefer_data[0]
-        self.fiyat = sefer_data[5] + 150 
-        
-        varis_rehber = sehir_detay_getir(sefer_data[2])
-        iklim_tipi = varis_rehber.get("iklim", "Ilıman")
-        
-        guncel_hava = dinamik_hava_durumu_getir(sefer_data[2], sefer_data[3], iklim_tipi)
-        
-        user_bday = QDate.fromString(self.parent.aktif_kullanici[5], "dd.MM.yyyy")
-        today = QDate.currentDate()
-        is_birthday = False
-        if user_bday.isValid():
-            is_birthday = (user_bday.day() == today.day() and user_bday.month() == today.month())
-        
-        if is_birthday:
-            self.fiyat *= 0.75
-            self.header.setText(f"🎂 Doğum Günü İndirimi! Ödenecek: {self.fiyat:.2f} TL\nVarış: {sefer_data[2]} | Tahmini Hava: {guncel_hava}")
-            self.header.setStyleSheet("font-size: 18px; font-weight: bold; color: #d35400;")
-        else: 
-            self.header.setText(f"Sefer Fiyatı (+150 TL Koltuk Seçim): {self.fiyat:.2f} TL\nVarış: {sefer_data[2]} | Tahmini Hava: {guncel_hava}")
-            self.header.setStyleSheet("font-size: 18px; font-weight: bold; color: #2c3e50;")
-        
-        dolu = dolu_koltuklari_getir(self.sefer_id)
-        
-        for i in reversed(range(self.grid.count())): 
-            item = self.grid.takeAt(i)
-            if item.widget(): 
-                item.widget().deleteLater()
-            
-        for n in range(1, 41):
-            btn = QPushButton(str(n))
-            btn.setFixedSize(50, 50)
-            btn.setStyleSheet("font-size: 16px; font-weight: bold;")
-            golge_ekle(btn)
-            
-            if n in dolu: 
-                btn.setStyleSheet(btn.styleSheet() + "background-color: #e74c3c; color: white; border-radius: 10px;")
-                btn.setEnabled(False)
-            else:
-                btn.setStyleSheet(btn.styleSheet() + "background-color: #2ecc71; color: white; border-radius: 10px;")
-                btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                btn.clicked.connect(lambda ch, kno=n: self.onay(kno))
-            sutun = (n-1)%4
-            self.grid.addWidget(btn, (n-1)//4, sutun if sutun < 2 else sutun + 1)
-        self.grid.setColumnMinimumWidth(2, 70)
-
-    def onay(self, kno):
-        cevap = QMessageBox.question(self, "Bilet Al", f"{kno} numaralı koltuğu {self.fiyat:.2f} TL karşılığında onaylıyor musunuz?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        if cevap == QMessageBox.StandardButton.Yes:
-            self.parent.bilet_satin_al_islem(self.parent.aktif_kullanici[0], self.sefer_id, kno, self.fiyat)
-
-# --- 4. ANA PENCERE YÖNETİCİSİ ---
-class SkyBoundApp(QStackedWidget):
+# ================= ANA UYGULAMA =================
+class TravelApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        veritabani_hazirla()
-        self.aktif_kullanici = None
-        
-        self.login_scr = LoginScreen(self)
-        self.reg_scr = RegisterScreen(self)
-        self.admin_scr = AdminPanel(self)
-        self.pass_scr = PassengerPanel(self)
-        self.seat_scr = SeatSelectionPanel(self)
-        
-        self.addWidget(self.login_scr)
-        self.addWidget(self.reg_scr)
-        self.addWidget(self.admin_scr)
-        self.addWidget(self.pass_scr)
-        self.addWidget(self.seat_scr)
-        
-        self.setMinimumSize(1100, 800)
-        self.setWindowTitle("✈️ SkyBound Premium - Havayolu Biletleme Sistemi")
-        self.setStyleSheet(GLOBAL_STYLE)
+        self.db = DB()
+        self.setWindowTitle("Travel OS Pro - Profesyonel Seyahat Planlayıcı")
+        self.setGeometry(100, 100, 1400, 800)
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #f3f4f6;
+            }
+            QPushButton {
+                font-weight: bold;
+            }
+            QTableWidget {
+                alternate-background-color: #f9fafb;
+            }
+            QHeaderView::section {
+                background-color: #1f2937;
+                color: white;
+                padding: 8px;
+                font-weight: bold;
+            }
+        """)
+        self.ui()
 
-    def login_basarili(self, user):
-        self.aktif_kullanici = user
-        if user[1] == "admin": 
-            self.admin_scr.yenile()
-            self.setCurrentIndex(2)
-        else: 
-            self.pass_scr.update_user(user)
-            self.setCurrentIndex(3)
+    def ui(self):
+        root = QWidget()
+        self.setCentralWidget(root)
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        root.setLayout(layout)
 
-    def koltuk_secim_ekranini_ac(self, data):
-        self.seat_scr.ekran_hazirla(data)
-        self.setCurrentIndex(4)
+        # Yan Menü
+        sidebar = QFrame()
+        sidebar.setFixedWidth(280)
+        sidebar.setStyleSheet("""
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                stop:0 #1e293b, stop:1 #0f172a);
+            color: white;
+            border: none;
+        """)
 
-    def bilet_satin_al_islem(self, kid, sid, kno, fiyat):
-        ok, msg = bilet_satin_al(kid, sid, kno, fiyat)
-        if ok:
-            QMessageBox.information(self, "Bilet Onaylandı", f"🎉 Biletiniz başarıyla tanımlandı!\n\nKoltuk No: {kno}\nÖdenen Tutar: {fiyat:.2f} TL")
-            self.aktif_kullanici = kullanici_getir_by_id(kid)
-            self.pass_scr.update_user(self.aktif_kullanici)
-            self.setCurrentIndex(3)
-        else: 
-            QMessageBox.warning(self, "Hata Oluştu", msg)
+        s = QVBoxLayout()
+        s.setSpacing(5)
 
-    def rastgele_koltuk_ata(self, sefer_data):
-        sefer_id, base_fiyat = sefer_data[0], sefer_data[5]
-        dolu = dolu_koltuklari_getir(sefer_id)
-        bos = [i for i in range(1, 41) if i not in dolu]
-        
-        if not bos: 
-            return QMessageBox.warning(self, "Kapasite Dolu", "Maalesef bu uçakta boş yer kalmadı!")
-        
-        atanan = random.choice(bos)
-        
-        user_bday = QDate.fromString(self.aktif_kullanici[5], "dd.MM.yyyy")
-        today = QDate.currentDate()
-        is_birthday = False
-        if user_bday.isValid():
-            is_birthday = (user_bday.day() == today.day() and user_bday.month() == today.month())
-        
-        fiyat = base_fiyat * 0.75 if is_birthday else base_fiyat
-        
-        ok, msg = bilet_satin_al(self.aktif_kullanici[0], sefer_id, atanan, fiyat)
-        if ok:
-            if fiyat < base_fiyat:
-                QMessageBox.information(self, "Doğum Günü Sürprizi", f"🎂 Doğum Gününüz Kutlu Olsun!\n\nSistem size ücretsiz olarak Koltuk {atanan} atadı.\n%25 İndirimli Ödenen Tutar: {fiyat:.2f} TL")
-            else:
-                QMessageBox.information(self, "Bilet Onaylandı", f"Sistem size ücretsiz olarak Koltuk {atanan} atadı.\n\nÖdenen Tutar: {fiyat:.2f} TL")
-                
-            self.aktif_kullanici = kullanici_getir_by_id(self.aktif_kullanici[0])
-            self.pass_scr.update_user(self.aktif_kullanici)
-        else: 
-            QMessageBox.warning(self, "Hata Oluştu", msg)
+        title = QLabel("✈ TRAVEL OS")
+        title.setStyleSheet("""
+            font-size: 24px;
+            font-weight: bold;
+            padding: 20px;
+            border-bottom: 2px solid #3b82f6;
+            margin-bottom: 20px;
+        """)
+        title.setAlignment(Qt.AlignCenter)
+        s.addWidget(title)
 
+        nav_buttons = [
+            ("📊 Dashboard", self.go_dashboard),
+            ("✈ Seyahatlerim", self.go_trips),
+            ("➕ Yeni Seyahat", self.go_add),
+            ("💰 Bütçe Genel Bakış", self.go_budget),
+            ("📈 İstatistikler", self.go_stats)
+        ]
+
+        for text, callback in nav_buttons:
+            btn = QPushButton(f"  {text}")
+            btn.setStyleSheet("""
+                QPushButton {
+                    padding: 15px;
+                    text-align: left;
+                    border: none;
+                    color: white;
+                    font-size: 14px;
+                }
+                QPushButton:hover {
+                    background: #334155;
+                    border-left: 4px solid #3b82f6;
+                }
+            """)
+            btn.clicked.connect(callback)
+            s.addWidget(btn)
+
+        s.addStretch()
+
+        version = QLabel("Versiyon 2.0 | Profesyonel")
+        version.setStyleSheet("padding: 15px; color: #94a3b8; font-size: 11px;")
+        version.setAlignment(Qt.AlignCenter)
+        s.addWidget(version)
+
+        sidebar.setLayout(s)
+
+        # Yığın
+        self.stack = QStackedWidget()
+        self.stack.setStyleSheet("""
+            QStackedWidget {
+                background-color: #f8fafc;
+            }
+        """)
+
+        self.page_dashboard()
+        self.page_trips()
+        self.page_add()
+        self.page_budget()
+        self.page_stats()
+
+        self.stack.addWidget(self.dash_page)
+        self.stack.addWidget(self.trips_page)
+        self.stack.addWidget(self.add_page)
+        self.stack.addWidget(self.budget_page)
+        self.stack.addWidget(self.stats_page)
+
+        layout.addWidget(sidebar)
+        layout.addWidget(self.stack)
+
+    def page_dashboard(self):
+        self.dash_page = QWidget()
+        layout = QVBoxLayout()
+        layout.setSpacing(20)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        header = QLabel("Dashboard")
+        header.setStyleSheet("font-size: 28px; font-weight: bold; color: #1e293b;")
+        layout.addWidget(header)
+
+        # Kartlar
+        cards_layout = QHBoxLayout()
+        cards_layout.setSpacing(20)
+
+        self.total_trips_card = self.create_stats_card("Toplam Seyahat", "0", "#3b82f6")
+        self.total_budget_card = self.create_stats_card("Toplam Bütçe", "0 TL", "#10b981")
+        self.total_spent_card = self.create_stats_card("Toplam Harcama", "0 TL", "#ef4444")
+        self.remaining_card = self.create_stats_card("Kalan Bütçe", "0 TL", "#f59e0b")
+
+        cards_layout.addWidget(self.total_trips_card)
+        cards_layout.addWidget(self.total_budget_card)
+        cards_layout.addWidget(self.total_spent_card)
+        cards_layout.addWidget(self.remaining_card)
+        layout.addLayout(cards_layout)
+
+        # Yaklaşan Seyahatler
+        upcoming_label = QLabel("📅 Yaklaşan Seyahatler")
+        upcoming_label.setStyleSheet("font-size: 18px; font-weight: bold; margin-top: 20px;")
+        layout.addWidget(upcoming_label)
+
+        self.upcoming_table = QTableWidget()
+        self.upcoming_table.setColumnCount(5)
+        self.upcoming_table.setHorizontalHeaderLabels(["ID", "Şehir", "Ülke", "Başlangıç", "Bütçe"])
+        self.upcoming_table.hideColumn(0)
+        self.upcoming_table.setAlternatingRowColors(True)
+        self.upcoming_table.horizontalHeader().setStretchLastSection(True)
+        self.upcoming_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        header_table = self.upcoming_table.horizontalHeader()
+        header_table.setSectionResizeMode(1, QHeaderView.Stretch)
+        header_table.setSectionResizeMode(2, QHeaderView.Stretch)
+
+        layout.addWidget(self.upcoming_table, 1)
+
+        self.dash_page.setLayout(layout)
+        self.update_dashboard()
+
+    def create_stats_card(self, title, value, color):
+        card = QFrame()
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: white;
+                border-radius: 12px;
+                border: 1px solid #e2e8f0;
+            }}
+        """)
+        card.setMinimumHeight(120)
+        card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        layout = QVBoxLayout()
+        layout.setContentsMargins(15, 15, 15, 15)
+
+        title_label = QLabel(title)
+        title_label.setStyleSheet("color: #64748b; font-size: 14px;")
+
+        self.value_label = QLabel(value)
+        self.value_label.setStyleSheet(f"color: {color}; font-size: 32px; font-weight: bold;")
+        self.value_label.setWordWrap(True)
+
+        layout.addWidget(title_label)
+        layout.addWidget(self.value_label)
+        layout.addStretch()
+
+        card.setLayout(layout)
+        return card
+
+    def update_dashboard(self):
+        trips = self.db.get_trips()
+        total_budget = self.db.total_budget()
+        total_spent = self.db.total_expenses() + self.db.total_hotel_cost()
+        remaining = total_budget - total_spent
+
+        # Kartları güncelle
+        for child in self.total_trips_card.findChildren(QLabel):
+            if child.text() != "Toplam Seyahat":
+                child.setText(str(len(trips)))
+                break
+
+        for child in self.total_budget_card.findChildren(QLabel):
+            if child.text() != "Toplam Bütçe":
+                child.setText(f"₺{total_budget:,.0f}")
+                break
+
+        for child in self.total_spent_card.findChildren(QLabel):
+            if child.text() != "Toplam Harcama":
+                child.setText(f"₺{total_spent:,.0f}")
+                break
+
+        for child in self.remaining_card.findChildren(QLabel):
+            if child.text() != "Kalan Bütçe":
+                child.setText(f"₺{remaining:,.0f}")
+                break
+
+        upcoming = self.db.get_upcoming_trips()
+        self.upcoming_table.setRowCount(0)
+        for trip in upcoming:
+            row = self.upcoming_table.rowCount()
+            self.upcoming_table.insertRow(row)
+            self.upcoming_table.setItem(row, 0, QTableWidgetItem(str(trip[0])))
+            self.upcoming_table.setItem(row, 1, QTableWidgetItem(trip[1]))
+            self.upcoming_table.setItem(row, 2, QTableWidgetItem(trip[2]))
+            self.upcoming_table.setItem(row, 3, QTableWidgetItem(trip[3]))
+            self.upcoming_table.setItem(row, 4, QTableWidgetItem(f"₺{trip[5]:,.0f}"))
+
+    def page_trips(self):
+        self.trips_page = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        header = QLabel("Seyahatlerim")
+        header.setStyleSheet("font-size: 28px; font-weight: bold; color: #1e293b;")
+        layout.addWidget(header)
+
+        search_layout = QHBoxLayout()
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("🔍 Şehir veya ülkeye göre ara...")
+        self.search_input.setStyleSheet("padding: 10px; border-radius: 8px; border: 1px solid #cbd5e1;")
+        self.search_input.textChanged.connect(self.search_trips)
+        search_layout.addWidget(self.search_input)
+        layout.addLayout(search_layout)
+
+        self.trip_table = QTableWidget()
+        self.trip_table.setColumnCount(7)
+        self.trip_table.setHorizontalHeaderLabels(["ID", "Şehir", "Ülke", "Başlangıç", "Bitiş", "Bütçe", "Durum"])
+        self.trip_table.hideColumn(0)
+        self.trip_table.setAlternatingRowColors(True)
+        self.trip_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.trip_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.trip_table.doubleClicked.connect(self.view_trip_details)
+
+        header_table = self.trip_table.horizontalHeader()
+        header_table.setSectionResizeMode(1, QHeaderView.Stretch)
+        header_table.setSectionResizeMode(2, QHeaderView.Stretch)
+
+        buttons_layout = QHBoxLayout()
+
+        btn_view = QPushButton("📋 Detayları Görüntüle")
+        btn_view.clicked.connect(self.view_trip_details)
+        btn_view.setStyleSheet("background-color: #3b82f6; color: white; padding: 10px; border-radius: 6px;")
+
+        btn_delete = QPushButton("🗑 Seyahati Sil")
+        btn_delete.clicked.connect(self.delete_trip)
+        btn_delete.setStyleSheet("background-color: #ef4444; color: white; padding: 10px; border-radius: 6px;")
+
+        btn_refresh = QPushButton("🔄 Yenile")
+        btn_refresh.clicked.connect(self.load_trips)
+        btn_refresh.setStyleSheet("background-color: #10b981; color: white; padding: 10px; border-radius: 6px;")
+
+        buttons_layout.addWidget(btn_view)
+        buttons_layout.addWidget(btn_delete)
+        buttons_layout.addWidget(btn_refresh)
+        buttons_layout.addStretch()
+
+        layout.addWidget(self.trip_table)
+        layout.addLayout(buttons_layout)
+
+        self.trips_page.setLayout(layout)
+        self.load_trips()
+
+    def load_trips(self):
+        trips = self.db.get_trips()
+        self.all_trips = trips
+        self.search_trips()
+
+    def search_trips(self):
+        search_text = self.search_input.text().lower()
+        filtered = [t for t in self.all_trips if search_text in t[1].lower() or search_text in t[2].lower()]
+
+        self.trip_table.setRowCount(0)
+        for trip in filtered:
+            row = self.trip_table.rowCount()
+            self.trip_table.insertRow(row)
+            self.trip_table.setItem(row, 0, QTableWidgetItem(str(trip[0])))
+            self.trip_table.setItem(row, 1, QTableWidgetItem(trip[1]))
+            self.trip_table.setItem(row, 2, QTableWidgetItem(trip[2]))
+            self.trip_table.setItem(row, 3, QTableWidgetItem(trip[3]))
+            self.trip_table.setItem(row, 4, QTableWidgetItem(trip[4]))
+            self.trip_table.setItem(row, 5, QTableWidgetItem(f"₺{trip[5]:,.0f}"))
+            self.trip_table.setItem(row, 6, QTableWidgetItem(trip[6]))
+
+            status_item = self.trip_table.item(row, 6)
+            if trip[6] == "Tamamlandı":
+                status_item.setForeground(Qt.green)
+            elif trip[6] == "Devam Ediyor":
+                status_item.setForeground(Qt.blue)
+            elif trip[6] == "İptal Edildi":
+                status_item.setForeground(Qt.red)
+
+    def delete_trip(self):
+        row = self.trip_table.currentRow()
+        if row < 0:
+            QMessageBox.warning(self, "Uyarı", "Lütfen silmek için bir seyahat seçin!")
+            return
+
+        tid = int(self.trip_table.item(row, 0).text())
+        city = self.trip_table.item(row, 1).text()
+
+        reply = QMessageBox.question(self, "Silme Onayı",
+                                     f"{city} seyahatini silmek istediğinizden emin misiniz?\n"
+                                     "Tüm oteller, planlar ve harcamalar da silinecektir!",
+                                     QMessageBox.Yes | QMessageBox.No)
+
+        if reply == QMessageBox.Yes:
+            self.db.delete_trip(tid)
+            self.load_trips()
+            self.update_dashboard()
+            self.update_budget_page()
+            QMessageBox.information(self, "Başarılı", "Seyahat başarıyla silindi!")
+
+    def view_trip_details(self):
+        row = self.trip_table.currentRow()
+        if row < 0:
+            QMessageBox.warning(self, "Uyarı", "Lütfen detaylarını görüntülemek için bir seyahat seçin!")
+            return
+        tid = int(self.trip_table.item(row, 0).text())
+        dialog = TripDetailDialog(self.db, tid, self)
+        dialog.exec_()
+        self.load_trips()
+        self.update_dashboard()
+        self.update_budget_page()
+
+    def page_add(self):
+        self.add_page = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        header = QLabel("Yeni Seyahat Ekle")
+        header.setStyleSheet("font-size: 28px; font-weight: bold; color: #1e293b;")
+        layout.addWidget(header)
+
+        form_card = QFrame()
+        form_card.setStyleSheet("""
+            QFrame {
+                background-color: white;
+                border-radius: 12px;
+                border: 1px solid #e2e8f0;
+            }
+        """)
+        form_layout = QFormLayout()
+        form_layout.setSpacing(15)
+        form_layout.setContentsMargins(30, 30, 30, 30)
+
+        self.add_city = QLineEdit()
+        self.add_city.setPlaceholderText("Örn: İstanbul")
+        self.add_city.setStyleSheet("padding: 10px; border-radius: 6px; border: 1px solid #cbd5e1;")
+
+        self.add_country = QLineEdit()
+        self.add_country.setPlaceholderText("Örn: Türkiye")
+        self.add_country.setStyleSheet("padding: 10px; border-radius: 6px; border: 1px solid #cbd5e1;")
+
+        self.add_start = QDateEdit()
+        self.add_start.setDate(QDate.currentDate())
+        self.add_start.setCalendarPopup(True)
+        self.add_start.setStyleSheet("padding: 10px; border-radius: 6px; border: 1px solid #cbd5e1;")
+
+        self.add_end = QDateEdit()
+        self.add_end.setDate(QDate.currentDate().addDays(7))
+        self.add_end.setCalendarPopup(True)
+        self.add_end.setStyleSheet("padding: 10px; border-radius: 6px; border: 1px solid #cbd5e1;")
+
+        self.add_budget = QDoubleSpinBox()
+        self.add_budget.setRange(0, 1000000)
+        self.add_budget.setPrefix("₺")
+        self.add_budget.setStyleSheet("padding: 10px; border-radius: 6px; border: 1px solid #cbd5e1;")
+
+        self.add_status = QComboBox()
+        self.add_status.addItems(["Planlandı", "Devam Ediyor"])
+
+        form_layout.addRow("Şehir *:", self.add_city)
+        form_layout.addRow("Ülke *:", self.add_country)
+        form_layout.addRow("Başlangıç Tarihi:", self.add_start)
+        form_layout.addRow("Bitiş Tarihi:", self.add_end)
+        form_layout.addRow("Bütçe (TL):", self.add_budget)
+        form_layout.addRow("Durum:", self.add_status)
+
+        form_card.setLayout(form_layout)
+
+        btn_add = QPushButton("✈ Seyahat Oluştur")
+        btn_add.setStyleSheet("""
+            QPushButton {
+                background-color: #3b82f6;
+                color: white;
+                padding: 15px;
+                border-radius: 8px;
+                font-size: 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #2563eb;
+            }
+        """)
+        btn_add.clicked.connect(self.add_trip)
+
+        layout.addWidget(form_card)
+        layout.addWidget(btn_add)
+        layout.addStretch()
+
+        self.add_page.setLayout(layout)
+
+    def add_trip(self):
+        if not self.add_city.text() or not self.add_country.text():
+            QMessageBox.warning(self, "Uyarı", "Lütfen şehir ve ülke girin!")
+            return
+
+        if self.add_start.date() > self.add_end.date():
+            QMessageBox.warning(self, "Uyarı", "Bitiş tarihi başlangıç tarihinden sonra olmalıdır!")
+            return
+
+        try:
+            tid = self.db.add_trip(
+                self.add_city.text(),
+                self.add_country.text(),
+                self.add_start.date().toString("yyyy-MM-dd"),
+                self.add_end.date().toString("yyyy-MM-dd"),
+                self.add_budget.value(),
+                self.add_status.currentText()
+            )
+
+            self.add_city.clear()
+            self.add_country.clear()
+            self.add_start.setDate(QDate.currentDate())
+            self.add_end.setDate(QDate.currentDate().addDays(7))
+            self.add_budget.setValue(0)
+
+            self.load_trips()
+            self.update_dashboard()
+            self.update_budget_page()
+
+            QMessageBox.information(self, "Başarılı", "Seyahat başarıyla oluşturuldu!")
+
+            reply = QMessageBox.question(self, "Detay Ekle",
+                                         "Şimdi otel, plan ve harcama eklemek ister misiniz?",
+                                         QMessageBox.Yes | QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                dialog = TripDetailDialog(self.db, tid, self)
+                dialog.exec_()
+                self.update_budget_page()
+
+        except Exception as e:
+            QMessageBox.critical(self, "Hata", f"Seyahat eklenirken hata oluştu: {str(e)}")
+
+    def page_budget(self):
+        self.budget_page = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        header = QLabel("Bütçe Genel Bakış")
+        header.setStyleSheet("font-size: 28px; font-weight: bold; color: #1e293b;")
+        layout.addWidget(header)
+
+        self.budget_summary = QLabel()
+        self.budget_summary.setStyleSheet("""
+            QLabel {
+                background-color: white;
+                padding: 25px;
+                border-radius: 12px;
+                border: 1px solid #e2e8f0;
+                font-size: 16px;
+            }
+        """)
+        self.budget_summary.setWordWrap(True)
+        layout.addWidget(self.budget_summary)
+
+        trips_label = QLabel("Seyahat Bazlı Bütçe Dağılımı")
+        trips_label.setStyleSheet("font-size: 18px; font-weight: bold; margin-top: 20px;")
+        layout.addWidget(trips_label)
+
+        self.budget_table = QTableWidget()
+        self.budget_table.setColumnCount(5)
+        self.budget_table.setHorizontalHeaderLabels(["Seyahat", "Bütçe", "Harcanan", "Kalan", "Durum"])
+        self.budget_table.setAlternatingRowColors(True)
+
+        header_table = self.budget_table.horizontalHeader()
+        header_table.setSectionResizeMode(0, QHeaderView.Stretch)
+        header_table.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+
+        layout.addWidget(self.budget_table)
+
+        self.update_budget_page()
+
+    def update_budget_page(self):
+        trips = self.db.get_trips()
+        total_budget = self.db.total_budget()
+        total_spent = self.db.total_expenses() + self.db.total_hotel_cost()
+        remaining = total_budget - total_spent
+
+        self.budget_summary.setText(f"""
+        <table width="100%" cellpadding="10">
+        <tr><td style="background:#3b82f6; color:white; border-radius:8px; text-align:center;">
+            <b>📊 Toplam Bütçe</b><br>
+            <span style="font-size:24px;">₺{total_budget:,.0f}</span>
+        </td>
+        <td style="background:#ef4444; color:white; border-radius:8px; text-align:center;">
+            <b>💰 Toplam Harcama</b><br>
+            <span style="font-size:24px;">₺{total_spent:,.0f}</span>
+        </td>
+        <td style="background:#10b981; color:white; border-radius:8px; text-align:center;">
+            <b>✅ Kalan Bütçe</b><br>
+            <span style="font-size:24px;">₺{remaining:,.0f}</span>
+        </td>
+        </tr>
+        <tr>
+        <td colspan="3" style="background:#f59e0b; color:white; border-radius:8px; text-align:center;">
+            <b>📈 Toplam Seyahat Sayısı: {len(trips)}</b>
+        </td>
+        </tr>
+        </table>
+        """)
+
+        self.budget_table.setRowCount(0)
+        for trip in trips:
+            row = self.budget_table.rowCount()
+            self.budget_table.insertRow(row)
+
+            trip_spent = self.db.get_trip_expense_total(trip[0]) + self.db.get_hotel_total_by_trip(trip[0])
+            trip_remaining = trip[5] - trip_spent
+
+            self.budget_table.setItem(row, 0, QTableWidgetItem(f"{trip[1]}, {trip[2]}"))
+            self.budget_table.setItem(row, 1, QTableWidgetItem(f"₺{trip[5]:,.0f}"))
+            self.budget_table.setItem(row, 2, QTableWidgetItem(f"₺{trip_spent:,.0f}"))
+            self.budget_table.setItem(row, 3, QTableWidgetItem(f"₺{trip_remaining:,.0f}"))
+            self.budget_table.setItem(row, 4, QTableWidgetItem(trip[6]))
+
+            if trip_remaining < 0:
+                self.budget_table.item(row, 3).setForeground(Qt.red)
+            elif trip_remaining < trip[5] * 0.2:
+                self.budget_table.item(row, 3).setForeground(Qt.darkYellow)
+
+    def page_stats(self):
+        self.stats_page = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        header = QLabel("İstatistikler ve Raporlar")
+        header.setStyleSheet("font-size: 28px; font-weight: bold; color: #1e293b;")
+        layout.addWidget(header)
+
+        status_counts = self.db.get_trip_count_by_status()
+
+        stats_text = f"""
+        <h3>Seyahat İstatistikleri</h3>
+        <table width="100%" cellpadding="15">
+        <tr>
+        <td style="background:#3b82f6; color:white; border-radius:10px; text-align:center;">
+            📋 Planlandı<br><b style="font-size:28px;">{status_counts['planned']}</b>
+        </td>
+        <td style="background:#10b981; color:white; border-radius:10px; text-align:center;">
+            ▶ Devam Ediyor<br><b style="font-size:28px;">{status_counts['ongoing']}</b>
+        </td>
+        <td style="background:#f59e0b; color:white; border-radius:10px; text-align:center;">
+            ✅ Tamamlandı<br><b style="font-size:28px;">{status_counts['completed']}</b>
+        </tr>
+        <td style="background:#ef4444; color:white; border-radius:10px; text-align:center;">
+            ❌ İptal Edildi<br><b style="font-size:28px;">{status_counts['cancelled']}</b>
+        </td>
+        </tr>
+        </table>
+        <br>
+        <h3>Toplam Bilgiler</h3>
+        <table width="100%" cellpadding="15">
+        <tr>
+        <td style="background:#8b5cf6; color:white; border-radius:10px; text-align:center;">
+            💰 Toplam Bütçe<br><b style="font-size:24px;">₺{self.db.total_budget():,.0f}</b>
+        </td>
+        <td style="background:#ec489a; color:white; border-radius:10px; text-align:center;">
+            🏨 Toplam Otel Harcaması<br><b style="font-size:24px;">₺{self.db.total_hotel_cost():,.0f}</b>
+        </td>
+        <td style="background:#14b8a6; color:white; border-radius:10px; text-align:center;">
+            🍽️ Toplam Diğer Harcama<br><b style="font-size:24px;">₺{self.db.total_expenses():,.0f}</b>
+        </td>
+        </tr>
+        </table>
+        """
+
+        stats_label = QLabel(stats_text)
+        stats_label.setWordWrap(True)
+        stats_label.setStyleSheet("padding: 20px;")
+
+        layout.addWidget(stats_label)
+        layout.addStretch()
+
+        self.stats_page.setLayout(layout)
+
+    def go_dashboard(self):
+        self.stack.setCurrentIndex(0)
+        self.update_dashboard()
+
+    def go_trips(self):
+        self.stack.setCurrentIndex(1)
+        self.load_trips()
+
+    def go_add(self):
+        self.stack.setCurrentIndex(2)
+
+    def go_budget(self):
+        self.stack.setCurrentIndex(3)
+        self.update_budget_page()
+
+    def go_stats(self):
+        self.stack.setCurrentIndex(4)
+
+
+# ================= ÇALIŞTIR =================
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    app.setStyle("Fusion") 
-    try:
-        ex = SkyBoundApp()
-        ex.show()
-        sys.exit(app.exec())
-    except Exception as e:
-        err_msg = traceback.format_exc()
-        QMessageBox.critical(None, "Kritik Sistem Hatası", f"Program başlatılırken veya çalışırken bir hata ile karşılaştı!\nLütfen şu hatayı kontrol edin:\n\n{err_msg}")
-        sys.exit(1)
+    app.setStyle('Fusion')
+    window = TravelApp()
+    window.show()
+    sys.exit(app.exec_())
